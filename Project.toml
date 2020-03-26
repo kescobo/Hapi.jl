@@ -1,0 +1,13 @@
+name = "Hapi"
+uuid = "44435ed6-78f5-4310-9349-4d47d7b9c9a9"
+authors = ["Kevin Bonham <kevbonham@gmail.com>"]
+version = "0.1.0"
+
+[compat]
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
