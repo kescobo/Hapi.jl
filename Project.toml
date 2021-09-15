@@ -3,6 +3,11 @@ uuid = "44435ed6-78f5-4310-9349-4d47d7b9c9a9"
 authors = ["Kevin Bonham <kevbonham@gmail.com>"]
 version = "0.1.0"
 
+[deps]
+ClusterManagers = "34f1f09b-3a8b-5176-ab39-66d58a4d544e"
+Dagger = "d58978e5-989f-55fb-8d15-ea34adc7bf54"
+FilePaths = "8fc22ac5-c921-52a6-82fd-178b2807b824"
+
 [compat]
 julia = "1"
 
