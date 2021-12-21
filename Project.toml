@@ -8,6 +8,7 @@ ClusterManagers = "34f1f09b-3a8b-5176-ab39-66d58a4d544e"
 Dagger = "d58978e5-989f-55fb-8d15-ea34adc7bf54"
 FilePaths = "8fc22ac5-c921-52a6-82fd-178b2807b824"
 FilePathsBase = "48062228-2e41-5def-b9a4-89aafe57970f"
+ReTest = "e0db7c4e-2690-44b9-bad6-7687da720f89"
 
 [compat]
 julia = "1"
