@@ -1,5 +1,9 @@
 ```@meta
 CurrentModule = Hapi
+DocTestSetup  = quote
+    using Hapi
+end
+```
 ```
 
 # Hapi
