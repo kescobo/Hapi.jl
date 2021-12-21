@@ -88,22 +88,22 @@ Examples
 ```jldoctest
 julia> rgx = build_regex("file{thing1}_{thing2}.txt", (thing1=raw"\\d+", thing2=raw"\\d+"));
 
-julia> readdir("test/projects/fileglob/")
+julia> readdir("../test/projects/fileglob/")
 4-element Vector{String}:
  "file1_1.txt"
  "file1_2.txt"
  "file2_1.txt"
  "file2_2.txt"
 
-julia> glob_pattern("test/projects/fileglob/", rgx)
+julia> glob_pattern("../test/projects/fileglob/", rgx)
 4-element Vector{FileDependency}:
- path: test/projects/fileglob/file1_1.txt
+ path: ../test/projects/fileglob/file1_1.txt
     params: (thing1 = "1", thing2 = "1")
- path: test/projects/fileglob/file1_2.txt
+ path: ../test/projects/fileglob/file1_2.txt
     params: (thing1 = "1", thing2 = "2")
- path: test/projects/fileglob/file2_1.txt
+ path: ../test/projects/fileglob/file2_1.txt
     params: (thing1 = "2", thing2 = "1")
- path: test/projects/fileglob/file2_2.txt
+ path: ../test/projects/fileglob/file2_2.txt
     params: (thing1 = "2", thing2 = "2")
 ```
 """
@@ -131,15 +131,15 @@ Examples
 ```jldoctest
 julia> rgx = build_regex("file{thing1}_{thing2}.txt", (thing1=raw"\\d+", thing2=raw"\\d+"));
 
-julia> glb = glob_pattern("test/projects/fileglob/", rgx)
+julia> glb = glob_pattern("../test/projects/fileglob/", rgx)
 4-element Vector{FileDependency}:
- path: test/projects/fileglob/file1_1.txt
+ path: ../test/projects/fileglob/file1_1.txt
     params: (thing1 = "1", thing2 = "1")
- path: test/projects/fileglob/file1_2.txt
+ path: ../test/projects/fileglob/file1_2.txt
     params: (thing1 = "1", thing2 = "2")
- path: test/projects/fileglob/file2_1.txt
+ path: ../test/projects/fileglob/file2_1.txt
     params: (thing1 = "2", thing2 = "1")
- path: test/projects/fileglob/file2_2.txt
+ path: ../test/projects/fileglob/file2_2.txt
     params: (thing1 = "2", thing2 = "2")
 
 julia> groupdeps(glb, [:thing1])

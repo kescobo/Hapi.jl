@@ -11,6 +11,6 @@ end
 ```@index
 ```
 
-```@autodocs
-Modules = [Hapi]
+```@docs
+build_regex
 ```
