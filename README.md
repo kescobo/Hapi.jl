@@ -20,3 +20,15 @@
 https://en.wikipedia.org/wiki/Hapi_(Nile_god)
 
 Some background: https://www.nature.com/articles/d41586-019-02619-z
+
+## Notes
+
+This is my workflow manager.
+[There](https://snakemake.readthedocs.io/en/stable/)
+[are](https://airflow.apache.org)
+[many](https://cromwell.readthedocs.io/en/stable/)
+[like](https://github.com/spotify/luigi)
+[it](https://www.commonwl.org/#Implementations),
+but this one is mine.
+
+See [issue 1](https://github.com/kescobo/Hapi.jl/issues/1) for more details.
