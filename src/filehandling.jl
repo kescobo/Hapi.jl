@@ -34,14 +34,14 @@ function Base.show(io::IO, fdg::FileDepGroup)
             shared params: $(params(fdg))""")
 end
 
-# This is copied from https://github.com/JuliaLang/julia/pull/37299, not needed in julia 1.7+
-function Base.keys(m::RegexMatch)
-    idx_to_capture_name = PCRE.capture_names(m.regex.regex)
-    return map(eachindex(m.captures)) do i
-        # If the capture group is named, return it's name, else return it's index
-        get(idx_to_capture_name, i, i)
-    end
-end
+# # This is copied from https://github.com/JuliaLang/julia/pull/37299, not needed in julia 1.7+
+# function Base.keys(m::RegexMatch)
+#     idx_to_capture_name = PCRE.capture_names(m.regex.regex)
+#     return map(eachindex(m.captures)) do i
+#         # If the capture group is named, return it's name, else return it's index
+#         get(idx_to_capture_name, i, i)
+#     end
+# end
 
 """
     build_regex(pattern, groups)
