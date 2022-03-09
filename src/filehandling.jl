@@ -10,6 +10,8 @@ FileDependency(p::AbstractString, params) = FileDependency(Path(p), params)
 
 path(fdep::FileDependency) = fdep.path
 params(fdep::FileDependency) = fdep.params
+FilePaths.exists(fdep::FileDependency) = exists(path(fdep))
+Base.mkpath(fdep::FileDependency) = makepath(dirname(path(fdep)))
 
 Base.getindex(fdep::FileDependency, i::Symbol) = getindex(params(fdep), i)
 
@@ -27,6 +29,7 @@ end
 deps(fdg::FileDepGroup) = fdg.deps
 params(fdg::FileDepGroup) = fdg.sharedparams
 path(fdg::FileDepGroup) = path.(deps(fdg))
+Base.mkpath(fdep::FileDepGroup) = makepath.(dirname.(path(fdep)))
 
 function Base.show(io::IO, fdg::FileDepGroup)
     print(io, """
