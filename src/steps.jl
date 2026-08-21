@@ -11,7 +11,7 @@ struct Step
     f::Function
     name::Symbol
     outputs::Vector{OutputDecl}
-    depends_on::Vector{Function}   # explicit code deps folded into code_hash (I9)
+    depends_on::Vector{Function}   # explicit code deps folded into digest(::Step) (I9)
     stale_policy::Symbol           # :hash (default) | :exists
     on_upstream_failure::Symbol    # :fail (default) | :skip | :placeholder
 end
@@ -57,57 +57,60 @@ end
 # unset and are overridden later by env!/resources!, never at definition (I6).
 function (s::Step)(inputs::AbstractArtifact...; params...)
     return StepInstance(
-        s, code_hash(s), collect(AbstractArtifact, inputs),
+        s, digest(s), collect(AbstractArtifact, inputs),
         merge_params(inputs, NamedTuple(params)), :cached, :native, Resources()
     )
 end
 
 # A node's payload is its eventual output's payload, available only once the graph has
-# actually been run and committed to the store — Phase 1.
+# actually been run and committed to the store — execution isn't implemented yet.
 payload(si::StepInstance) = error(
     "StepInstance for step :$(si.step.name) has not been produced yet — run the graph first."
 )
 
 """
-    code_hash(step::Step) -> Digest
+    digest(step::Step) -> Digest
 
 Shallow source-text hash (I9): the source of every method of `step.f`, plus every
 function in `step.depends_on`, concatenated in a deterministic order and hashed. No
 automatic transitive callee hashing — that's what `depends_on` is for.
 """
-function code_hash(step::Step)
+function digest(step::Step)
     assert_no_captures(step.f)
-    srcs = String[method_source(m) for m in methods(step.f)]
+    srcs = String[sourcetext(m) for m in methods(step.f)]
     for dep in step.depends_on
         assert_no_captures(dep)
-        append!(srcs, method_source(m) for m in methods(dep))
+        append!(srcs, sourcetext(m) for m in methods(dep))
     end
     sort!(srcs)
     return digest(join(srcs, "\0"))
 end
 
-method_source(m::Method) = string(CodeTracking.definition(String, m))
+sourcetext(m::Method) = string(CodeTracking.definition(String, m))
 
-# Phase 0 only resolves the `:native` env; naming any other env is a loud error rather
-# than a silently-wrong hash, since real resolution (JLL/conda/container identity) is
-# Phase 2 (I5).
-env_identity_digest(env::EnvName) =
+# Only the `:native` env resolves today; naming any other env is a loud error rather than
+# a silently-wrong hash, since real resolution (JLL/conda/container identity) isn't
+# implemented yet (I5). Not a `digest` method: EnvName is a bare `Symbol` alias, not a
+# distinct type, so dispatching on it would mean dispatching on *any* Symbol.
+envdigest(env::EnvName) =
     env === :native ? digest("tool-identity:native") :
-    error("env resolution for :$env is not implemented until Phase 2 — only :native works today.")
+    error("env resolution for :$env is not implemented — only :native works today.")
 
-input_hash(x::StepInstance) = instance_hash(x)
-input_hash(x::AbstractArtifact) =
+"""
+    digest(x::AbstractArtifact) -> Digest
+    digest(si::StepInstance) -> Digest
+
+An artifact's content digest — its `.hash` field once produced, or (for a `StepInstance`,
+which is more specific and so takes precedence) its task identity (plan §4): code hash +
+params + resolved env tool-identity + each input's digest, recursing into upstream
+StepInstances. `resources` never enters this (I4).
+"""
+digest(x::AbstractArtifact) =
     hasfield(typeof(x), :hash) && x.hash !== nothing ? x.hash::Digest : digest(repr(x))
 
-"""
-    instance_hash(si::StepInstance) -> Digest
-
-Task identity (plan §4): code hash + params + resolved env tool-identity + each input's
-hash (recursing into upstream StepInstances). `resources` never enters this (I4).
-"""
-function instance_hash(si::StepInstance)
-    return combine(
-        si.code_hash, digest(repr(si.params)), env_identity_digest(si.env),
-        (input_hash(x) for x in si.inputs)...
+function digest(si::StepInstance)
+    return digest(
+        si.code_hash, digest(repr(si.params)), envdigest(si.env),
+        (digest(x) for x in si.inputs)...
     )
 end

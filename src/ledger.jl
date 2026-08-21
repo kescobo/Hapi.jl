@@ -1,6 +1,7 @@
-# SQLite provenance ledger (plan §5). Two of the columns below exist purely as Phase-0
-# forward-compat hooks (I11) — Phase 0 never writes anything but their default/'present'/
-# 'failed' values, but retrofitting the columns later would mean a schema migration.
+# SQLite provenance ledger (plan §5). Two of the columns below exist purely as
+# forward-compat hooks (I11) — nothing here yet writes anything but their default/
+# 'present'/'failed' values, but retrofitting the columns later would mean a schema
+# migration once optional outputs and retention/GC land.
 const STEP_INSTANCES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS step_instances (
     hash          TEXT PRIMARY KEY,
@@ -29,19 +30,26 @@ CREATE TABLE IF NOT EXISTS outputs (
 """
 
 """
-    open_ledger(path=".hapi/db/hapi.sqlite") -> SQLite.DB
+    ledger(file=".hapi/db/hapi.sqlite") -> SQLite.DB
 
 Open (creating if needed) the provenance ledger, ensuring the schema exists.
 """
-function open_ledger(path::AbstractString = joinpath(".hapi", "db", "hapi.sqlite"))
-    mkpath(dirname(path))
-    db = SQLite.DB(path)
+function ledger(file::AbstractString = joinpath(".hapi", "db", "hapi.sqlite"))
+    mkpath(dirname(file))
+    db = SQLite.DB(file)
     DBInterface.execute(db, STEP_INSTANCES_SCHEMA)
     DBInterface.execute(db, OUTPUTS_SCHEMA)
     return db
 end
 
-function record_step_instance!(
+"""
+    record!(db, hash, si::StepInstance; status="pending", user=nothing, git_commit=nothing)
+    record!(db, step_hash, name::Symbol, state::Symbol; output_hash=nothing)
+
+Upsert a ledger row: either a `StepInstance`'s own row, or one of its outputs' state
+(`:present` | `:intentionally_absent` | `:failed`, I11a).
+"""
+function record!(
         db::SQLite.DB, hash::Digest, si::StepInstance;
         status::AbstractString = "pending",
         user::Union{Nothing, AbstractString} = nothing,
@@ -63,7 +71,7 @@ function record_step_instance!(
     return nothing
 end
 
-function record_output!(
+function record!(
         db::SQLite.DB, step_hash::Digest, name::Symbol, state::Symbol;
         output_hash::Union{Nothing, Digest} = nothing
     )
@@ -85,13 +93,13 @@ function record_output!(
 end
 
 """
-    step_instance_row(db, hash) -> Union{Nothing,SQLite.Row}
+    row(db, hash) -> Union{Nothing,NamedTuple}
 
-The raw ledger row for `hash`, or `nothing` if no such StepInstance was recorded. The
-basis for `hapi why` (Phase 1).
+The raw `step_instances` ledger row for `hash`, or `nothing` if no such StepInstance was
+recorded. The basis for the `hapi why` command once the CLI exists.
 """
-function step_instance_row(db::SQLite.DB, hash::Digest)
-    for row in DBInterface.execute(
+function row(db::SQLite.DB, hash::Digest)
+    for r in DBInterface.execute(
             db,
             """
             SELECT hash, step_name, code_hash, params, env, retention, temp_refcount, status
@@ -100,8 +108,8 @@ function step_instance_row(db::SQLite.DB, hash::Digest)
             (string(hash),)
         )
         return (
-            hash = row.hash, step_name = row.step_name, code_hash = row.code_hash, params = row.params,
-            env = row.env, retention = row.retention, temp_refcount = row.temp_refcount, status = row.status,
+            hash = r.hash, step_name = r.step_name, code_hash = r.code_hash, params = r.params,
+            env = r.env, retention = r.retention, temp_refcount = r.temp_refcount, status = r.status,
         )
     end
     return nothing

@@ -4,12 +4,18 @@ struct Digest
     bytes::NTuple{32, UInt8}
 end
 
+"""
+    digest(x) -> Digest
+
+The content digest of `x`. Dispatches over what `x` is: raw bytes or a string hash
+directly; a `Digest...` combination folds several digests into one (order-sensitive —
+used to fold a StepInstance's code hash, params, env identity, and each input's hash into
+a single instance hash); a `Step` hashes its source (`code_hash`, I9); an `AbstractArtifact`
+or `StepInstance` hashes its task identity (plan §4).
+"""
 digest(data::AbstractVector{UInt8}) = Digest(NTuple{32, UInt8}(sha256(data)))
 digest(s::AbstractString) = digest(Vector{UInt8}(codeunits(s)))
-
-# Combine several digests into one, order-sensitive — used to fold a StepInstance's
-# code hash, params, env identity, and each input's hash into a single instance hash.
-combine(parts::Digest...) = digest(reduce(vcat, (collect(p.bytes) for p in parts); init = UInt8[]))
+digest(parts::Digest...) = digest(reduce(vcat, (collect(p.bytes) for p in parts); init = UInt8[]))
 
 Base.string(d::Digest) = bytes2hex(collect(d.bytes))
 Base.show(io::IO, d::Digest) = print(io, "Digest(", string(d)[1:12], "…)")
@@ -47,16 +53,16 @@ end
 function globalrefs(ci::Core.CodeInfo)
     refs = GlobalRef[]
     for stmt in ci.code
-        collect_globalrefs!(refs, stmt)
+        globalrefs!(refs, stmt)
     end
     return refs
 end
 
-collect_globalrefs!(acc::Vector{GlobalRef}, x::GlobalRef) = push!(acc, x)
-function collect_globalrefs!(acc::Vector{GlobalRef}, x::Expr)
+globalrefs!(acc::Vector{GlobalRef}, x::GlobalRef) = push!(acc, x)
+function globalrefs!(acc::Vector{GlobalRef}, x::Expr)
     for a in x.args
-        collect_globalrefs!(acc, a)
+        globalrefs!(acc, a)
     end
     return acc
 end
-collect_globalrefs!(acc::Vector{GlobalRef}, x) = acc
+globalrefs!(acc::Vector{GlobalRef}, x) = acc

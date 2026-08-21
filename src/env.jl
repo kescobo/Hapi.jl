@@ -9,14 +9,16 @@ struct JLLEnv <: EnvSpec
     pkgs::Vector{String}   # e.g. ["Samtools_jll@1.17"]
 end
 
-# Phase 2: `spec` will be `CondaPkg.PkgSpec` once CondaPkg.jl is a dependency. Kept
-# structurally present now (plan §3) without pulling in an unused Phase-2 dependency.
+# Conda env delivery isn't implemented yet. `spec` will be `CondaPkg.PkgSpec` once
+# CondaPkg.jl is a dependency — kept structurally present now (plan §3) without pulling in
+# a dependency nothing uses yet.
 struct CondaEnv <: EnvSpec
     spec::Any
 end
 
-# Phase 2: container execution (apptainer preferred; podman/docker; user-provided images
-# only). `binds` will use FilePaths' `AbstractPath` once concrete artifacts land.
+# Container execution (apptainer preferred; podman/docker; user-provided images only)
+# isn't implemented yet. `binds` will use FilePaths' `AbstractPath` once concrete
+# artifacts land.
 struct Container <: EnvSpec
     image::String
     runtime::Symbol   # :apptainer (default) | :podman | :docker

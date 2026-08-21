@@ -5,5 +5,5 @@
 
     f(x) = x
     si = Step(f, :noop)()
-    @test_throws ErrorException payload(si)   # not produced yet — Phase 1
+    @test_throws ErrorException payload(si)   # not produced yet — execution isn't implemented
 end

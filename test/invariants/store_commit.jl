@@ -4,12 +4,12 @@
     root = mktempdir()
     d = digest("some-content")
 
-    td = tmp_dir(; root)
+    td = scratchdir(; root)
     write(joinpath(td, "partial.txt"), "oops")
-    @test !isdir(store_path(d; root))   # interrupted: never committed, never visible
+    @test !isdir(path(d; root))   # interrupted: never committed, never visible
 
     target = commit!(td, d; root)
-    @test target == store_path(d; root)
+    @test target == path(d; root)
     @test isdir(target)
     @test isfile(joinpath(target, "partial.txt"))
 end

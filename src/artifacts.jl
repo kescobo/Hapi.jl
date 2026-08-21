@@ -1,5 +1,6 @@
 # The trait every input type implements (plan.md §3, I10). Concrete subtypes
-# (FileArtifact, ObjectArtifact, FileGroupArtifact, StoredRef, Reference) are Phase 1.
+# (FileArtifact, ObjectArtifact, FileGroupArtifact, StoredRef, Reference) don't exist yet —
+# they're built on top of this once real artifacts start flowing through steps.
 abstract type AbstractArtifact end
 
 """

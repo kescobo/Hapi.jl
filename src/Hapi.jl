@@ -3,9 +3,9 @@ module Hapi
 export AbstractArtifact, payload,
     EnvSpec, Native, JLLEnv, CondaEnv, Container, EnvName, Resources,
     Digest, digest,
-    OutputDecl, required, optional, Step, StepInstance, code_hash, instance_hash,
-    store_path, tmp_dir, commit!,
-    open_ledger, record_step_instance!, record_output!, step_instance_row,
+    OutputDecl, required, optional, Step, StepInstance,
+    path, scratchdir, commit!,
+    ledger, record!, row,
     PlanResult, plan,
     ExecutionBackend, Local
 
