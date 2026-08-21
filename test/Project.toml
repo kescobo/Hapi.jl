@@ -1,2 +1,4 @@
 [deps]
+Hapi = "44435ed6-78f5-4310-9349-4d47d7b9c9a9"
 ReTest = "e0db7c4e-2690-44b9-bad6-7687da720f89"
+TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"

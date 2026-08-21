@@ -1,16 +1,26 @@
 name = "Hapi"
 uuid = "44435ed6-78f5-4310-9349-4d47d7b9c9a9"
-authors = ["Kevin Bonham <kevbonham@gmail.com>"]
 version = "0.1.0"
+authors = ["Kevin Bonham <kevbonham@gmail.com>"]
 
 [deps]
 ClusterManagers = "34f1f09b-3a8b-5176-ab39-66d58a4d544e"
+CodeTracking = "da1fd8a2-8d9e-5ec2-8556-3022fb5608a2"
+DBInterface = "a10d1c49-ce27-4219-8d33-6db1a4562965"
 Dagger = "d58978e5-989f-55fb-8d15-ea34adc7bf54"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 FilePaths = "8fc22ac5-c921-52a6-82fd-178b2807b824"
 FilePathsBase = "48062228-2e41-5def-b9a4-89aafe57970f"
 ReTest = "e0db7c4e-2690-44b9-bad6-7687da720f89"
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+SQLite = "0aa819cd-b072-5ff4-a722-6bc24af294d9"
 
 [compat]
+CodeTracking = "3.0.2"
+DBInterface = "2.7.0"
+Dates = "1.11.0"
+SHA = "0.7.0"
+SQLite = "1.8.1"
 julia = "1.7"
 
 [extras]
