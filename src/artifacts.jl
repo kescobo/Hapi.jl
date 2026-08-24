@@ -60,16 +60,15 @@ digest(fg::FileGroupArtifact) = fg.hash !== nothing ? fg.hash : digest((digest(f
 """
     artifact(x, params::NamedTuple) -> AbstractArtifact
 
-The inverse of `payload`: lift a step body's raw return value into an artifact, so an
-authored function can take and return *plain* values (`AbstractPath`, a `NamedTuple` of
-paths) and stay an ordinary, non-Hapi function — `run` calls this after the body returns.
-Dispatches on what came back: an `AbstractPath` becomes a `FileArtifact`; a `NamedTuple` of
-paths becomes a `FileGroupArtifact` (each member lifted the same way, with no params of its
-own — the group carries the shared `params`, matching plan §3's own construction pattern).
-A body that already returns an `AbstractArtifact` — for full control over retention, a
-custom hash, etc. — passes through unchanged; `params` is ignored in that case, since the
-body set its own.
+The inverse of `payload`: lift one raw value a step body returned into an artifact, so a
+body can return *plain* values (`AbstractPath`) and stay an ordinary, non-Hapi function —
+`run` calls this on the body's return value, or on each field of it when a `NamedTuple`
+return means several independent outputs (`@step`/multi-output, `backends.jl`) rather than
+one grouped artifact. An `AbstractPath` becomes a `FileArtifact`. A body that already
+returns an `AbstractArtifact` — for full control over an explicit hash, etc., or to return
+one *grouped* output (`FileGroupArtifact((R1=.., R2=..); sample)` stays one output, not
+two) — passes through unchanged; `params` is ignored in that case, since the body set its
+own.
 """
 artifact(x::AbstractArtifact, params::NamedTuple) = x
 artifact(p::AbstractPath, params::NamedTuple) = FileArtifact(p, nothing, params)
-artifact(ps::NamedTuple, params::NamedTuple) = FileGroupArtifact(map(p -> artifact(p, NamedTuple()), ps), nothing, params)

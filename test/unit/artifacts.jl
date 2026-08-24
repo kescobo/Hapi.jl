@@ -47,12 +47,12 @@ end
     @test fa.path == Path(p1)
     @test fa.params == (; sample = "A")
 
-    # a plain NamedTuple of paths becomes a FileGroupArtifact; members carry no params of
-    # their own — the group carries the shared params
-    fg = artifact((R1 = Path(p1), R2 = Path(p2)), (; sample = "A"))
-    @test fg isa FileGroupArtifact
-    @test fg.params == (; sample = "A")
-    @test fg.files.R1.params == (;) && fg.files.R2.params == (;)
+    # an explicitly-constructed FileGroupArtifact passes through unchanged — it's ONE
+    # grouped output, not several (a *bare* NamedTuple return means several separate
+    # outputs instead; that's handled in `run`'s execution loop, not by `artifact` — see
+    # test/unit/multi_output.jl)
+    grouped = FileGroupArtifact((R1 = FileArtifact(p1), R2 = FileArtifact(p2)); sample = "A")
+    @test artifact(grouped, (; sample = "ignored")) === grouped
 
     # a body that already returns an artifact (full control, e.g. an explicit hash) passes
     # through unchanged

@@ -3,12 +3,14 @@ module Hapi
 export AbstractArtifact, payload, artifact, FileArtifact, FileGroupArtifact,
     EnvSpec, Native, JLLEnv, CondaEnv, Container, EnvName, Resources,
     Digest, digest,
-    OutputDecl, required, optional, Step, StepInstance, @step,
+    OutputDecl, required, optional, Step, StepInstance, Output, @step,
     path, scratchdir, commit!, output_path,
-    ledger, record!, row,
-    PlanResult, plan,
+    ledger, record!, row, outputrows,
+    PlanResult, plan, targets,
     ExecutionBackend, Local,
     source, glob_table,
+    confluence,
+    RetentionPolicy, retention, retentionfor,
     AbstractPath, Path
 
 using Dates: Period
@@ -34,6 +36,8 @@ include("store.jl")
 include("ledger.jl")
 include("plan.jl")
 include("source.jl")
+include("retention.jl")
+include("confluence.jl")
 include("backends.jl")
 
 end # module

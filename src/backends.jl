@@ -44,56 +44,106 @@ relocate(fa::FileArtifact, dir::AbstractString, h::Digest) =
 relocate(fg::FileGroupArtifact, dir::AbstractString, h::Digest) =
     FileGroupArtifact(map(fa -> relocate(fa, dir, h), fg.files), h, fg.params)
 
-# Cache-hit path: rebuild the produced artifact from what's already committed, without
-# re-running the step. Only handles the single-file-output case this pass's Steps actually
-# produce (`outputs=[required(name)]`, one `output_path` write) — a committed dir with more
-# than one file would need a persisted manifest to reconstruct correctly, not implemented
-# yet, so it errors clearly rather than guessing.
-function reconstruct(si::StepInstance, h::Digest)
-    dir = path(h)
-    files = readdir(dir)
-    length(files) == 1 || error(
-        "cache-hit reconstruction for a multi-file output isn't implemented yet " *
-            "(committed dir for :$(si.step.name) at $h has $(length(files)) files)"
+# A step's raw return value determines its outputs (I10 extension, `@step` docs): a bare
+# NamedTuple is several independent outputs, each lifted/relocated on its own; anything
+# else (a plain value, or an explicitly-constructed artifact — including a FileGroupArtifact,
+# which stays ONE grouped output, not several) is the step's one output, named after the
+# step itself.
+finalizeoutputs(result::NamedTuple, si::StepInstance, dir::AbstractString, h::Digest) =
+    NamedTuple(name => relocate(artifact(v, si.params), dir, h) for (name, v) in pairs(result))
+finalizeoutputs(result, si::StepInstance, dir::AbstractString, h::Digest) =
+    relocate(artifact(result, si.params), dir, h)
+
+relpathof(a::FileArtifact) = basename(string(a.path))
+
+function recordoutputs!(db::SQLite.DB, h::Digest, si::StepInstance, finalized::NamedTuple, policy)
+    for (name, art) in pairs(finalized)
+        record!(
+            db, h, name, :present; output_hash = h, relpath = relpathof(art),
+            retention = retentionfor(policy, si.step.name, name)
+        )
+    end
+    return nothing
+end
+function recordoutputs!(db::SQLite.DB, h::Digest, si::StepInstance, finalized, policy)
+    name = si.step.name
+    record!(
+        db, h, name, :present; output_hash = h, relpath = relpathof(finalized),
+        retention = retentionfor(policy, si.step.name, name)
     )
-    return FileArtifact(Path(joinpath(dir, only(files))), h, si.params)
+    return nothing
 end
 
 """
-    run(target::StepInstance; backend::ExecutionBackend=Local())
-    run(targets::AbstractVector{<:StepInstance}; backend::ExecutionBackend=Local())
+    reconstruct(db, si, h) -> AbstractArtifact or NamedTuple
 
-Execute the graph reachable from `target(s)` (push model, I7 — no backward target
-resolution, just the wired graph) and return the produced artifact(s), in the same
-shape as the input (one artifact, or a vector). A `StepInstance` already recorded in the
-ledger with `status="done"` is a cache hit and is not re-run. `:fail` (abort on error,
+Cache-hit path: rebuild the produced output(s) from the ledger + committed store, without
+re-running the step. A single `outputs` row named after the step itself (`finalizeoutputs`'s
+convention on the write side) reconstructs as one artifact; anything else — no rows, or
+rows under other names — reconstructs as the `NamedTuple` of them. (A step whose one real
+output happens to be a 1-field `NamedTuple` named after the step itself is indistinguishable
+from a plain single output on reconstruction — a known, narrow ambiguity, not silently
+mishandled: it's the same convention on both the write and read side, just not unique.)
+"""
+function reconstruct(db::SQLite.DB, si::StepInstance, h::Digest)
+    orows = outputrows(db, h)
+    dir = path(h)
+    if length(orows) == 1 && orows[1].name == si.step.name
+        r = only(orows)
+        return FileArtifact(Path(joinpath(dir, r.relpath)), h, si.params)
+    end
+    return NamedTuple(r.name => FileArtifact(Path(joinpath(dir, r.relpath)), h, si.params) for r in orows)
+end
+
+# The inverse of `targets` (plan.jl): mirror any nested Tuple/NamedTuple/AbstractArray,
+# replacing each StepInstance/Output leaf with its produced value and leaving everything
+# else untouched. Used both to resolve a StepInstance's own `.inputs` during execution and
+# to shape `run`'s return value to match whatever was passed in — one mechanism for both.
+resolve(si::StepInstance, produced) = produced[si]
+resolve(o::Output, produced) = produced[o.si][o.name]
+resolve(x::Tuple, produced) = map(v -> resolve(v, produced), x)
+resolve(x::NamedTuple, produced) = map(v -> resolve(v, produced), x)
+resolve(x::AbstractArray, produced) = map(v -> resolve(v, produced), x)
+resolve(x, produced) = x
+
+"""
+    run(x; backend::ExecutionBackend=Local(), retention::Union{Nothing,RetentionPolicy}=nothing)
+
+Execute the graph `targets(x)` finds (push model, I7 — no backward target resolution, just
+the wired graph) and return the produced result in the *same shape* as `x` — a single
+node, a `Vector`, an arbitrary nested `(; qc, results)`, whatever `x` was. A `StepInstance`
+already recorded in the ledger with `status="done"` is a cache hit and is not re-run.
+`retention` is a `RetentionPolicy` (see `retention.jl`) consulted when recording each
+output's ledger row; omitted, every output records as `:cached`. `:fail` (abort on error,
 the default `Base` behaviour of letting the exception propagate) is the only implemented
 `on_upstream_failure` policy; `:skip`/`:placeholder` aren't wired up yet.
 """
-Base.run(target::StepInstance; backend::ExecutionBackend = Local()) = only(run([target]; backend))
-
-function Base.run(targets::AbstractVector{<:StepInstance}; backend::ExecutionBackend = Local())
+function Base.run(
+        x; backend::ExecutionBackend = Local(),
+        retention::Union{Nothing, RetentionPolicy} = nothing
+    )
     backend isa Local || error("only the Local backend is implemented today")
-    p = plan(targets)
+    p = plan(x)
     db = ledger()
-    produced = Dict{StepInstance, AbstractArtifact}()
+    produced = Dict{StepInstance, Any}()
     for si in p.order
         h = digest(si)
         rec = row(db, h)
         if rec !== nothing && rec.status == "done"
-            produced[si] = reconstruct(si, h)
+            produced[si] = reconstruct(db, si, h)
             continue
         end
-        resolved = [x isa StepInstance ? produced[x] : x for x in si.inputs]
+        resolved = [resolve(inp, produced) for inp in si.inputs]
         scratch = scratchdir()
         result = with(CURRENT_SCRATCH => scratch) do
-            si.step.f(payload.(resolved)...; si.params...)
+            si.step.collapse ? si.step.f(payload.(resolved); si.params...) :
+                si.step.f(payload.(resolved)...; si.params...)
         end
         dir = commit!(scratch, h)
-        finalized = relocate(artifact(result, si.params), dir, h)
+        finalized = finalizeoutputs(result, si, dir, h)
         record!(db, h, si; status = "done")
-        record!(db, h, only(si.step.outputs).name, :present; output_hash = h)
+        recordoutputs!(db, h, si, finalized, retention)
         produced[si] = finalized
     end
-    return [produced[t] for t in targets]
+    return resolve(x, produced)
 end

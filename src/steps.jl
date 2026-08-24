@@ -14,11 +14,14 @@ struct Step
     depends_on::Vector{Function}   # explicit code deps folded into digest(::Step) (I9)
     stale_policy::Symbol           # :hash (default) | :exists
     on_upstream_failure::Symbol    # :fail (default) | :skip | :placeholder
+    collapse::Bool                 # true only for confluence(f, nodes) — see confluence.jl.
+    # Changes the calling convention, not code identity, so — like stale_policy/
+    # on_upstream_failure — it's un-hashed Step metadata (see digest(::Step)).
 end
 
 function Step(
         f::Function, name::Symbol; outputs = OutputDecl[], depends_on = Function[],
-        stale_policy::Symbol = :hash, on_upstream_failure::Symbol = :fail
+        stale_policy::Symbol = :hash, on_upstream_failure::Symbol = :fail, collapse::Bool = false
     )
     stale_policy in (:hash, :exists) ||
         error("stale_policy must be :hash or :exists, got :$stale_policy")
@@ -26,7 +29,7 @@ function Step(
         error("on_upstream_failure must be :fail, :skip, or :placeholder, got :$on_upstream_failure")
     return Step(
         f, name, collect(OutputDecl, outputs), collect(Function, depends_on),
-        stale_policy, on_upstream_failure
+        stale_policy, on_upstream_failure, collapse
     )
 end
 
@@ -45,10 +48,12 @@ end
 
 # Sample identity propagates through the graph: an input's own `params` (if it has any)
 # folds in automatically, then explicit keywords apply on top.
+paramsof(x) = hasfield(typeof(x), :params) ? x.params : NamedTuple()
+
 function merge_params(inputs, kwparams::NamedTuple)
     merged = NamedTuple()
     for x in inputs
-        hasfield(typeof(x), :params) && (merged = merge(merged, x.params))
+        merged = merge(merged, paramsof(x))
     end
     return merge(merged, kwparams)
 end
@@ -67,6 +72,28 @@ end
 payload(si::StepInstance) = error(
     "StepInstance for step :$(si.step.name) has not been produced yet — run the graph first."
 )
+
+# A reference to one specific named output of a multi-output StepInstance (I10 extension:
+# a step's return value determines its outputs — a NamedTuple return is N named outputs,
+# keyed by its field names; a single value is one, named after the step). `si[:profile]`
+# wires that one output into a downstream call exactly like any other artifact.
+struct Output <: AbstractArtifact
+    si::StepInstance
+    name::Symbol
+end
+Base.getindex(si::StepInstance, name::Symbol) = Output(si, name)
+Base.getindex(si::StepInstance, names::Tuple{Vararg{Symbol}}) = map(n -> Output(si, n), names)
+paramsof(o::Output) = o.si.params
+
+payload(o::Output) = error(
+    "Output :$(o.name) of step :$(o.si.step.name) has not been produced yet — run the graph first."
+)
+
+# Combines the parent StepInstance's digest with the output name — not just the parent's
+# digest alone, or two different outputs of the same instance (e.g. metaphlan's :sam vs
+# :profile) would hash identically as a downstream consumer's input, silently masking a
+# wiring mistake.
+digest(o::Output) = digest(digest(o.si), digest(string(o.name)))
 
 """
     concretemethods(f) -> Vector{Method}
@@ -114,16 +141,17 @@ original method is left completely untouched (still directly callable/testable o
 values — `foo(a_real_path; sample="x")` runs the body exactly as written, no Hapi types
 involved). `@step` adds ONE sibling method under the *same name* that accepts
 artifacts/`StepInstance`s and builds a lazy graph node via `Step`'s existing callable —
-ordinary multiple dispatch, not the macro, decides which method runs for a given call. The
-output declaration comes from the return-type annotation: one `required` output named
-after the step (multi-output/optional declarations aren't wired up yet).
+ordinary multiple dispatch, not the macro, decides which method runs for a given call.
 
 The body stays "normal" on *both* ends: `run` unwraps each input via `payload` before
-calling it, and wraps whatever it returns via `artifact` — an `AbstractPath` becomes a
-`FileArtifact`, a `NamedTuple` of paths becomes a `FileGroupArtifact`. Returning an
-`AbstractArtifact` directly still works (full control — a non-default retention, an
-explicit hash) and passes through `artifact` unchanged; that's the escape hatch, not the
-expected case.
+calling it, and wraps whatever it returns via `artifact`. What a body returns determines
+its outputs — not a macro option, decided fresh from the return value each run: a single
+value (an `AbstractPath`, say) is one output, named after the step; a `NamedTuple` return
+is N named outputs, one per field, each independently committed/hashed/retained — see
+`si[:name]`/`Output` for wiring a specific one downstream. Returning an `AbstractArtifact`
+directly always passes through `artifact` unchanged (full control — a custom hash, etc.);
+that also means an explicitly-constructed `FileGroupArtifact` return is one grouped output,
+not several — only a *bare* `NamedTuple` of un-wrapped values means "N separate outputs."
 
 Limitation, disclosed rather than silently mishandled: decorating a *second* concrete-typed
 overload of the same name still works for hashing (both methods are concrete, so

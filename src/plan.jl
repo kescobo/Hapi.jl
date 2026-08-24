@@ -12,21 +12,37 @@ struct PlanResult
 end
 
 """
-    plan(target::StepInstance) -> PlanResult
-    plan(targets::AbstractVector{<:StepInstance}) -> PlanResult
+    targets(x) -> Vector{StepInstance}
 
-Build the execution order for one or several targets and everything they (transitively)
-depend on — the vector form is what `Base.map`-based fan-out (plan §6) has to `run`. A
-pure graph walk over `.inputs` — no I/O, no backend knowledge (I1); nothing upstream of
-`run` may depend on how the graph will eventually be executed.
+Every `StepInstance` reachable from `x` by walking `Tuple`/`NamedTuple`/`AbstractArray`
+nesting — a `StepInstance` (or `Output`, resolved to its parent) is a leaf; anything else
+is ignored. This is what lets `plan`/`run`/`retention` take whatever ordinary Julia value
+a pipeline function returns (a single node, a `Vector`, `(; qc, results)`, ...) instead of
+requiring it pre-flattened.
 """
-plan(target::StepInstance)::PlanResult = plan([target])
+targets(x) = targets!(StepInstance[], x)
+targets!(acc::Vector{StepInstance}, si::StepInstance) = push!(acc, si)
+targets!(acc::Vector{StepInstance}, o::Output) = targets!(acc, o.si)
+function targets!(acc::Vector{StepInstance}, x::Union{Tuple, NamedTuple, AbstractArray})
+    for v in x
+        targets!(acc, v)
+    end
+    return acc
+end
+targets!(acc::Vector{StepInstance}, x) = acc
 
-function plan(targets::AbstractVector{<:StepInstance})::PlanResult
+"""
+    plan(x) -> PlanResult
+
+Build the execution order for every `StepInstance` `targets(x)` finds, and everything they
+(transitively) depend on. A pure graph walk over `.inputs` — no I/O, no backend knowledge
+(I1); nothing upstream of `run` may depend on how the graph will eventually be executed.
+"""
+function plan(x)::PlanResult
     order = StepInstance[]
     visiting = Set{StepInstance}()
     visited = Set{StepInstance}()
-    for target in targets
+    for target in targets(x)
         visit!(order, visiting, visited, target)
     end
     return PlanResult(order, false)
@@ -37,7 +53,11 @@ function visit!(order, visiting, visited, node::StepInstance)
     node in visiting && error("cycle detected in graph at step :$(node.step.name)")
     push!(visiting, node)
     for input in node.inputs
-        input isa StepInstance && visit!(order, visiting, visited, input)
+        if input isa StepInstance
+            visit!(order, visiting, visited, input)
+        elseif input isa Output
+            visit!(order, visiting, visited, input.si)
+        end
     end
     delete!(visiting, node)
     push!(visited, node)

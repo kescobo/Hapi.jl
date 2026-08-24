@@ -10,10 +10,15 @@
     record!(db, h, :out, :intentionally_absent)   # (a) intentionally-absent state
     rec = row(db, h)
     @test rec.status == "pending"
-    @test rec.temp_refcount == 0                   # (b) consumer-refcount column
+
+    orow = only(outputrows(db, h))
+    @test orow.state == :intentionally_absent               # (a) intentionally-absent state
+    @test orow.temp_refcount == 0                            # (b) consumer-refcount column
+    @test orow.retention isa Symbol
+    @test orow.retention in (:temp, :cached, :published)     # (b) retention class, per-output
 
     @test si.retention isa Symbol
-    @test si.retention in (:temp, :cached, :published)     # (b) retention class
+    @test si.retention in (:temp, :cached, :published)       # (b) retention class, per-instance hook
 
     p = plan(si)
     @test hasfield(typeof(p), :frontier)

@@ -2,9 +2,12 @@
     using Hapi
 
     @test hasmethod(run, Tuple{StepInstance})
-    @test !hasmethod(run, Tuple{AbstractString})   # no target-name/pull-style API
-    @test !isdefined(Hapi, :resolve)
-    @test !isdefined(Hapi, :target)
+    # `run` takes whatever `targets` can walk (a StepInstance, or nested collections of
+    # them) — genuinely no target-*name* API exists: a String isn't a graph, so it finds
+    # nothing to execute and comes back unchanged, rather than resolving to anything.
+    cd(mktempdir()) do
+        @test run("not-a-graph") == "not-a-graph"
+    end
 
     @step function idstep(p::AbstractPath; sample)::FileArtifact
         return FileArtifact(p; sample)
