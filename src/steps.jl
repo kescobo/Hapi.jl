@@ -69,15 +69,31 @@ payload(si::StepInstance) = error(
 )
 
 """
+    concretemethods(f) -> Vector{Method}
+
+`f`'s methods whose signature does *not* mention `AbstractArtifact` — i.e. the user's own
+concrete-typed method(s), excluding the `AbstractArtifact...`-dispatching sibling `@step`
+generates under the same name. `digest(::Step)` and `assert_no_captures` both use this so
+generated graph-building plumbing never leaks into the code hash or the purity check.
+"""
+concretemethods(f) = [m for m in methods(f) if !isgraphmethod(m)]
+isgraphmethod(m::Method) = any(mentions_abstractartifact, Base.unwrap_unionall(m.sig).parameters[2:end])
+mentions_abstractartifact(t::Core.TypeofVararg) = isdefined(t, :T) && mentions_abstractartifact(t.T)
+mentions_abstractartifact(t::Type) = t <: AbstractArtifact
+mentions_abstractartifact(t) = false
+
+"""
     digest(step::Step) -> Digest
 
-Shallow source-text hash (I9): the source of every method of `step.f`, plus every
-function in `step.depends_on`, concatenated in a deterministic order and hashed. No
-automatic transitive callee hashing — that's what `depends_on` is for.
+Shallow source-text hash (I9): the source of every *concrete-typed* method of `step.f`
+(`concretemethods` — excludes any `@step`-generated `AbstractArtifact`-dispatching
+sibling), plus every function in `step.depends_on`, concatenated in a deterministic order
+and hashed. No automatic transitive callee hashing — that's what `depends_on` is for.
 """
 function digest(step::Step)
-    assert_no_captures(step.f)
-    srcs = String[sourcetext(m) for m in methods(step.f)]
+    ms = concretemethods(step.f)
+    assert_no_captures(step.f, ms)
+    srcs = String[sourcetext(m) for m in ms]
     for dep in step.depends_on
         assert_no_captures(dep)
         append!(srcs, sourcetext(m) for m in methods(dep))
@@ -87,6 +103,44 @@ function digest(step::Step)
 end
 
 sourcetext(m::Method) = string(CodeTracking.definition(String, m))
+
+"""
+    @step function foo(p::AbstractPath; sample)::AbstractPath
+        ...
+    end
+
+Lift a function authored against **plain values** into a graph citizen (I2, I9): the
+original method is left completely untouched (still directly callable/testable on real
+values — `foo(a_real_path; sample="x")` runs the body exactly as written, no Hapi types
+involved). `@step` adds ONE sibling method under the *same name* that accepts
+artifacts/`StepInstance`s and builds a lazy graph node via `Step`'s existing callable —
+ordinary multiple dispatch, not the macro, decides which method runs for a given call. The
+output declaration comes from the return-type annotation: one `required` output named
+after the step (multi-output/optional declarations aren't wired up yet).
+
+The body stays "normal" on *both* ends: `run` unwraps each input via `payload` before
+calling it, and wraps whatever it returns via `artifact` — an `AbstractPath` becomes a
+`FileArtifact`, a `NamedTuple` of paths becomes a `FileGroupArtifact`. Returning an
+`AbstractArtifact` directly still works (full control — a non-default retention, an
+explicit hash) and passes through `artifact` unchanged; that's the escape hatch, not the
+expected case.
+
+Limitation, disclosed rather than silently mishandled: decorating a *second* concrete-typed
+overload of the same name still works for hashing (both methods are concrete, so
+`concretemethods`/`digest` see both) but its output declaration/policies replace the
+first `@step`'s `Step` — full per-overload metadata merging isn't implemented yet.
+"""
+macro step(expr)
+    def = splitdef(expr)
+    name = def[:name]
+    name isa Symbol || error("@step requires a plain function name, got $(name)")
+    stepvar = gensym(name)
+    return quote
+        $(esc(combinedef(def)))
+        const $(esc(stepvar)) = Step($(esc(name)), $(QuoteNode(name)); outputs = [required($(QuoteNode(name)))])
+        $(esc(name))(inputs::AbstractArtifact...; params...) = $(esc(stepvar))(inputs...; params...)
+    end
+end
 
 # Only the `:native` env resolves today; naming any other env is a loud error rather than
 # a silently-wrong hash, since real resolution (JLL/conda/container identity) isn't
