@@ -46,9 +46,11 @@ struct StepInstance <: AbstractArtifact
     resources::Resources
 end
 
-# Sample identity propagates through the graph: an input's own `params` (if it has any)
-# folds in automatically, then explicit keywords apply on top.
-paramsof(x) = hasfield(typeof(x), :params) ? x.params : NamedTuple()
+# Sample identity propagates through the graph: an input's own `params` folds in
+# automatically, then explicit keywords apply on top. Every element of `inputs` is an
+# AbstractArtifact (the Step callable's signature guarantees it); `Output` is the one
+# subtype without a `.params` field of its own, so it gets a more specific override below.
+paramsof(x::AbstractArtifact) = x.params
 
 function merge_params(inputs, kwparams::NamedTuple)
     merged = NamedTuple()
@@ -172,24 +174,21 @@ end
 
 # Only the `:native` env resolves today; naming any other env is a loud error rather than
 # a silently-wrong hash, since real resolution (JLL/conda/container identity) isn't
-# implemented yet (I5). Not a `digest` method: EnvName is a bare `Symbol` alias, not a
-# distinct type, so dispatching on it would mean dispatching on *any* Symbol.
-envdigest(env::EnvName) =
-    env === :native ? digest("tool-identity:native") :
-    error("env resolution for :$env is not implemented — only :native works today.")
+# implemented yet (I5). EnvName is a bare `Symbol` alias, not a distinct type, so this
+# can't be a `digest` method (dispatching on it would mean dispatching on *any* Symbol) —
+# but *within* this function, dispatching on `Val(env)` (rather than branching on `env ===
+# :native`) is the ordinary Julia way to switch on a symbol's value.
+envdigest(env::EnvName) = envdigest(Val(env))
+envdigest(::Val{:native}) = digest("tool-identity:native")
+envdigest(::Val{E}) where {E} = error("env resolution for :$E is not implemented — only :native works today.")
 
 """
-    digest(x::AbstractArtifact) -> Digest
     digest(si::StepInstance) -> Digest
 
-An artifact's content digest — its `.hash` field once produced, or (for a `StepInstance`,
-which is more specific and so takes precedence) its task identity (plan §4): code hash +
-params + resolved env tool-identity + each input's digest, recursing into upstream
-StepInstances. `resources` never enters this (I4).
+A StepInstance's task identity (plan §4): code hash + params + resolved env tool-identity
++ each input's digest, recursing into upstream StepInstances. `resources` never enters
+this (I4).
 """
-digest(x::AbstractArtifact) =
-    hasfield(typeof(x), :hash) && x.hash !== nothing ? x.hash::Digest : digest(repr(x))
-
 function digest(si::StepInstance)
     return digest(
         si.code_hash, digest(repr(si.params)), envdigest(si.env),

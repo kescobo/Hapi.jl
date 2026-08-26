@@ -53,14 +53,14 @@ function visit!(order, visiting, visited, node::StepInstance)
     node in visiting && error("cycle detected in graph at step :$(node.step.name)")
     push!(visiting, node)
     for input in node.inputs
-        if input isa StepInstance
-            visit!(order, visiting, visited, input)
-        elseif input isa Output
-            visit!(order, visiting, visited, input.si)
-        end
+        visitinput!(order, visiting, visited, input)
     end
     delete!(visiting, node)
     push!(visited, node)
     push!(order, node)
     return nothing
 end
+
+visitinput!(order, visiting, visited, input::StepInstance) = visit!(order, visiting, visited, input)
+visitinput!(order, visiting, visited, input::Output) = visit!(order, visiting, visited, input.si)
+visitinput!(order, visiting, visited, input) = nothing

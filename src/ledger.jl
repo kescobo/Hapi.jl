@@ -38,9 +38,12 @@ CREATE TABLE IF NOT EXISTS outputs (
 """
     ledger(file=".hapi/db/hapi.sqlite") -> SQLite.DB
 
-Open (creating if needed) the provenance ledger, ensuring the schema exists.
+Open (creating if needed) the provenance ledger, ensuring the schema exists. `file`
+resolves to an absolute path by default, consistent with `store.jl`'s `path`/`scratchdir`
+— harmless here (the open connection doesn't care about `run`'s later `cd`s), but keeping
+every `.hapi`-relative default anchored the same way avoids surprises.
 """
-function ledger(file::AbstractString = joinpath(".hapi", "db", "hapi.sqlite"))
+function ledger(file::AbstractString = abspath(joinpath(".hapi", "db", "hapi.sqlite")))
     mkpath(dirname(file))
     db = SQLite.DB(file)
     DBInterface.execute(db, STEP_INSTANCES_SCHEMA)
@@ -77,6 +80,11 @@ function record!(
     return nothing
 end
 
+# The SQLite-bindable form of an optional Digest — dispatches on the value itself rather
+# than branching on `=== nothing`.
+sqlvalue(::Nothing) = nothing
+sqlvalue(d::Digest) = string(d)
+
 function record!(
         db::SQLite.DB, step_hash::Digest, name::Symbol, state::Symbol;
         output_hash::Union{Nothing, Digest} = nothing,
@@ -98,7 +106,7 @@ function record!(
         """,
         (
             string(step_hash), string(name), string(state),
-            output_hash === nothing ? nothing : string(output_hash), relpath, string(retention),
+            sqlvalue(output_hash), relpath, string(retention),
         )
     )
     return nothing

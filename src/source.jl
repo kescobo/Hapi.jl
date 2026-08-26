@@ -36,7 +36,7 @@ function glob_table(pattern::AbstractString)
     rows = NamedTuple[]
     for fname in readdir(dir)
         m = match(rx, fname)
-        m === nothing && continue
+        isnothing(m) && continue
         wildcards = NamedTuple(n => m[string(n)] for n in names)
         push!(rows, merge(wildcards, (path = Path(joinpath(dir, fname)),)))
     end

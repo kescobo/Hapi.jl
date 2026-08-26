@@ -33,6 +33,36 @@ end
     @test digest(fg) == digest(digest(fg.files.R1), digest(fg.files.R2))
 end
 
+@testitem "FileGroupArtifact indexing" tags = [:fast] begin
+    using Hapi
+
+    dir = mktempdir()
+    p1, p2 = joinpath(dir, "r1.txt"), joinpath(dir, "r2.txt")
+    write(p1, "a")
+    write(p2, "b")
+
+    fg = FileGroupArtifact((R1 = FileArtifact(p1), R2 = FileArtifact(p2)); sample = "A")
+
+    # single key unwraps to the member, with the group's params merged in — members carry
+    # none of their own, so this is the only way `sample` survives pulling one out
+    r1 = fg[:R1]
+    @test r1 isa FileArtifact
+    @test r1.path == Path(p1)
+    @test r1.params == (; sample = "A")
+
+    # a tuple of keys gives back another FileGroupArtifact over just that subset (mirrors
+    # NamedTuple's own indexing), not a bare collection
+    sub = fg[(:R1, :R2)]
+    @test sub isa FileGroupArtifact
+    @test sub.params == fg.params
+    @test sub.hash === nothing   # not the parent's — the subset isn't byte-identical to it
+    @test digest(sub) == digest(fg)   # same members, so recombines to the same value here
+
+    # a member's own params (if it ever has any) win over the group's on conflict
+    fg2 = FileGroupArtifact((R1 = FileArtifact(p1; sample = "override"), R2 = FileArtifact(p2)); sample = "A")
+    @test fg2[:R1].params == (; sample = "override")
+end
+
 @testitem "artifact lifts a step body's plain return value (the inverse of payload)" tags = [:fast] begin
     using Hapi
 

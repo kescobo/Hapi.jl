@@ -8,7 +8,7 @@
     # plain-value in, plain-value out — no Hapi types in the body (run wraps the result)
     @step function wc(p::AbstractPath; sample)::AbstractPath
         calls[] += 1
-        out = output_path(p; suffix = "_wc")
+        out = Path(basename(string(p)) * "_wc")
         write(string(out), string(length(split(read(p, String)))))
         return out
     end

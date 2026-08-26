@@ -6,11 +6,13 @@
     write(joinpath(dir, "b.txt"), "2")
 
     @step function idfn(p::AbstractPath; sample)::AbstractPath
-        return p
+        out = Path(basename(string(p)) * "_copy")
+        write(string(out), read(p, String))
+        return out
     end
 
     function combine(paths::Vector{<:AbstractPath})
-        out = output_path(first(paths); suffix = "_combined")
+        out = Path(basename(string(first(paths))) * "_combined")
         write(string(out), string(length(paths)))
         return out
     end

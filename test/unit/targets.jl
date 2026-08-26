@@ -22,7 +22,7 @@ end
     using Hapi
 
     @step function idfn(p::AbstractPath; sample)::AbstractPath
-        out = output_path(p; suffix = "_copy")
+        out = Path(basename(string(p)) * "_copy")
         write(string(out), read(p, String))
         return out
     end

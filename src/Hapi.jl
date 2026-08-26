@@ -4,7 +4,7 @@ export AbstractArtifact, payload, artifact, FileArtifact, FileGroupArtifact,
     EnvSpec, Native, JLLEnv, CondaEnv, Container, EnvName, Resources,
     Digest, digest,
     OutputDecl, required, optional, Step, StepInstance, Output, @step,
-    path, scratchdir, commit!, output_path,
+    path, scratchdir, commit!,
     ledger, record!, row, outputrows,
     PlanResult, plan, targets,
     ExecutionBackend, Local,
@@ -21,7 +21,6 @@ using DBInterface
 using ReTest
 using FilePathsBase: AbstractPath, Path
 using MacroTools: splitdef, combinedef
-using Base.ScopedValues: ScopedValue, with
 using Tables
 
 @testset "Module Test" begin

@@ -1,6 +1,9 @@
 # Content-addressed store layout (plan §5): .hapi/store/objects/<hash[0:2]>/<hash>
 # (parameter is `d`, not `digest`, so it doesn't shadow the `digest` function in this scope)
-path(d::Digest; root::AbstractString = ".hapi") =
+# `root` resolves to an absolute path by default (not just the literal ".hapi") because
+# `run` (backends.jl) `cd`s into a step's scratch dir while it executes — a relative root
+# would silently point somewhere else once the working directory changes underneath it.
+path(d::Digest; root::AbstractString = abspath(".hapi")) =
     joinpath(root, "store", "objects", string(d)[1:2], string(d))
 
 """
@@ -11,7 +14,7 @@ store so `commit!` can `mv` into it atomically — not just `mktempdir()`, becau
 defaults to the system temp dir, which is frequently a different filesystem/mount than
 `root`, silently downgrading `commit!`'s `mv` from an atomic rename to a copy+delete (I8).
 """
-function scratchdir(; root::AbstractString = ".hapi")
+function scratchdir(; root::AbstractString = abspath(".hapi"))
     dir = joinpath(root, "tmp")
     mkpath(dir)
     return mktempdir(dir)
@@ -24,7 +27,7 @@ Atomically move a completed temp dir into the content-addressed store under `dig
 Only called after a StepInstance's outputs are fully written — a failed or interrupted
 run simply never calls this, so partial outputs never enter the store (I8).
 """
-function commit!(tmpdir::AbstractString, d::Digest; root::AbstractString = ".hapi")
+function commit!(tmpdir::AbstractString, d::Digest; root::AbstractString = abspath(".hapi"))
     target = path(d; root)
     isdir(target) && return target   # already committed under this content hash
     mkpath(dirname(target))

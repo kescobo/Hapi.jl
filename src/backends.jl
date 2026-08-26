@@ -13,34 +13,21 @@ execution/commit/cache-hit loop correct before adding process isolation on top o
 """
 struct Local <: ExecutionBackend end
 
-# The current task's scratch dir, bound around each step body's execution — the same
-# ambient-context technique plan §6.3 proposes for env, applied here to "where do I
-# write." Defaults to "." (the caller's working directory) so a step's concrete method
-# stays directly callable outside `run` — e.g. from a unit test — without needing to fake
-# up a `run` context (I2: the body must stay testable on real values).
-const CURRENT_SCRATCH = ScopedValue{String}(".")
+# `collapse` (confluence.jl) selects a calling convention, not a value — dispatch on
+# `Val(step.collapse)` rather than branching on the Bool directly.
+callstep(step::Step, args, params) = callstep(Val(step.collapse), step, args, params)
+callstep(::Val{true}, step::Step, args, params) = step.f(args; params...)
+callstep(::Val{false}, step::Step, args, params) = step.f(args...; params...)
 
-"""
-    output_path(p::AbstractPath; suffix="", ext=nothing) -> AbstractPath
-    output_path(ps::NamedTuple; suffix="", ext=nothing) -> NamedTuple
-
-Where a step body should write a new output: alongside `p`'s basename (with `suffix`
-appended and `ext` swapped in if given), inside the *current* task's scratch dir. The
-`NamedTuple` method applies the same to each path, for a grouped input.
-"""
-function output_path(p::AbstractPath; suffix::AbstractString = "", ext::Union{Nothing, AbstractString} = nothing)
-    base, oldext = splitext(basename(string(p)))
-    newext = ext === nothing ? oldext : (startswith(ext, ".") ? ext : "." * ext)
-    return Path(joinpath(CURRENT_SCRATCH[], base * suffix * newext))
-end
-output_path(ps::NamedTuple; kwargs...) = map(p -> output_path(p; kwargs...), ps)
-
-# Rewrite a body's returned artifact (paths still inside the now-moved scratch dir) to
-# point at its committed location in the store, with `.hash` set to the StepInstance's own
-# digest (re-running an identical StepInstance is guaranteed byte-identical, so a separate
-# content re-hash of the output is redundant — see digest(::FileArtifact)).
+# Rewrite a body's returned artifact — written to a path *relative to the scratch dir
+# it ran in* (see `run`'s `cd(scratch) do ... end` below) — to its committed absolute
+# location, preserving any subdirectory structure the body created (`mkpath("logs");
+# write("logs/x.txt", ...)` commits to `$dir/logs/x.txt`, not just `$dir/x.txt`), with
+# `.hash` set to the StepInstance's own digest (re-running an identical StepInstance is
+# guaranteed byte-identical, so a separate content re-hash of the output is redundant —
+# see digest(::FileArtifact)).
 relocate(fa::FileArtifact, dir::AbstractString, h::Digest) =
-    FileArtifact(Path(joinpath(dir, basename(string(fa.path)))), h, fa.params)
+    FileArtifact(Path(joinpath(dir, string(fa.path))), h, fa.params)
 relocate(fg::FileGroupArtifact, dir::AbstractString, h::Digest) =
     FileGroupArtifact(map(fa -> relocate(fa, dir, h), fg.files), h, fg.params)
 
@@ -54,21 +41,23 @@ finalizeoutputs(result::NamedTuple, si::StepInstance, dir::AbstractString, h::Di
 finalizeoutputs(result, si::StepInstance, dir::AbstractString, h::Digest) =
     relocate(artifact(result, si.params), dir, h)
 
-relpathof(a::FileArtifact) = basename(string(a.path))
+# The committed file's path, relative to its StepInstance's store dir — recorded in the
+# ledger so a cache hit (`reconstruct`) can rebuild the artifact without re-running.
+relpathof(a::FileArtifact, dir::AbstractString) = relpath(string(a.path), dir)
 
-function recordoutputs!(db::SQLite.DB, h::Digest, si::StepInstance, finalized::NamedTuple, policy)
+function recordoutputs!(db::SQLite.DB, h::Digest, si::StepInstance, finalized::NamedTuple, dir::AbstractString, policy)
     for (name, art) in pairs(finalized)
         record!(
-            db, h, name, :present; output_hash = h, relpath = relpathof(art),
+            db, h, name, :present; output_hash = h, relpath = relpathof(art, dir),
             retention = retentionfor(policy, si.step.name, name)
         )
     end
     return nothing
 end
-function recordoutputs!(db::SQLite.DB, h::Digest, si::StepInstance, finalized, policy)
+function recordoutputs!(db::SQLite.DB, h::Digest, si::StepInstance, finalized, dir::AbstractString, policy)
     name = si.step.name
     record!(
-        db, h, name, :present; output_hash = h, relpath = relpathof(finalized),
+        db, h, name, :present; output_hash = h, relpath = relpathof(finalized, dir),
         retention = retentionfor(policy, si.step.name, name)
     )
     return nothing
@@ -117,6 +106,14 @@ already recorded in the ledger with `status="done"` is a cache hit and is not re
 output's ledger row; omitted, every output records as `:cached`. `:fail` (abort on error,
 the default `Base` behaviour of letting the exception propagate) is the only implemented
 `on_upstream_failure` policy; `:skip`/`:placeholder` aren't wired up yet.
+
+Each step runs with the working directory `cd`'d into a fresh scratch dir — a step body
+writes outputs at plain, ordinary paths (`"trimmed.txt"`, `"logs/run.log"`, ...) with no
+Hapi call involved; `run` is what turns "wherever the body wrote, relative to where it
+ran" into "committed under the content-addressed store," not the body itself. This is
+also why the *identical* function is directly callable outside `run` (e.g. from a REPL or
+a unit test): called standalone, it just writes relative to the caller's own working
+directory, same as any ordinary function.
 """
 function Base.run(
         x; backend::ExecutionBackend = Local(),
@@ -129,20 +126,19 @@ function Base.run(
     for si in p.order
         h = digest(si)
         rec = row(db, h)
-        if rec !== nothing && rec.status == "done"
+        if !isnothing(rec) && rec.status == "done"
             produced[si] = reconstruct(db, si, h)
             continue
         end
         resolved = [resolve(inp, produced) for inp in si.inputs]
         scratch = scratchdir()
-        result = with(CURRENT_SCRATCH => scratch) do
-            si.step.collapse ? si.step.f(payload.(resolved); si.params...) :
-                si.step.f(payload.(resolved)...; si.params...)
+        result = cd(scratch) do
+            callstep(si.step, payload.(resolved), si.params)
         end
         dir = commit!(scratch, h)
         finalized = finalizeoutputs(result, si, dir, h)
         record!(db, h, si; status = "done")
-        recordoutputs!(db, h, si, finalized, retention)
+        recordoutputs!(db, h, si, finalized, dir, retention)
         produced[si] = finalized
     end
     return resolve(x, produced)

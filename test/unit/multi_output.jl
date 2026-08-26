@@ -4,9 +4,10 @@
     calls = Ref(0)
     @step function split3(p::AbstractPath; sample)
         calls[] += 1
-        a = output_path(p; suffix = "_a")
-        b = output_path(p; suffix = "_b")
-        c = output_path(p; suffix = "_c")
+        base = basename(string(p))
+        a = Path(base * "_a")
+        b = Path(base * "_b")
+        c = Path(base * "_c")
         write(string(a), "A")
         write(string(b), "B")
         write(string(c), "C")
@@ -14,7 +15,7 @@
     end
 
     @step function readback(p::AbstractPath; sample)::AbstractPath
-        out = output_path(p; suffix = "_copy")
+        out = Path(basename(string(p)) * "_copy")
         write(string(out), read(p, String))
         return out
     end
