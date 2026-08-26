@@ -2,9 +2,8 @@
     PlanResult
 
 `order` is the given target(s) and everything upstream of them, in dependency-first
-topological order. `frontier` is the I11c forward-compat hook: once dynamic
-(unknown-cardinality) outputs land, the execution loop will check it; it is always `false`
-today.
+topological order. `frontier` is a forward-compat hook for dynamic (unknown-cardinality)
+outputs, a feature that doesn't exist yet — it is always `false` today.
 """
 struct PlanResult
     order::Vector{StepInstance}
@@ -34,9 +33,9 @@ targets!(acc::Vector{StepInstance}, x) = acc
 """
     plan(x) -> PlanResult
 
-Build the execution order for every `StepInstance` `targets(x)` finds, and everything they
-(transitively) depend on. A pure graph walk over `.inputs` — no I/O, no backend knowledge
-(I1); nothing upstream of `run` may depend on how the graph will eventually be executed.
+Build the execution order for every `StepInstance` [`targets`](@ref)`(x)` finds, and
+everything they (transitively) depend on. A pure graph walk over `.inputs` — no I/O, no
+backend knowledge; nothing about how the graph will eventually be executed is decided here.
 """
 function plan(x)::PlanResult
     order = StepInstance[]

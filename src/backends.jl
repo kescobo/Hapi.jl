@@ -1,15 +1,17 @@
-# Execution backends (plan §7). SLURM/AWS still to come. Nothing above `run` may know
-# which of these is in use (I1).
+"""
+    ExecutionBackend
+
+Supertype for where/how [`run`](@ref) actually executes a graph's [`StepInstance`](@ref)s.
+[`Local`](@ref) is the only backend implemented today; SLURM/AWS backends are planned.
+Nothing above `run` needs to know which backend is in use.
+"""
 abstract type ExecutionBackend end
 
 """
     Local()
 
-Runs each StepInstance in-process, sequentially. `Distributed` process isolation (the
-plan's actual Local backend — "one process per task keeps semantics uniform with cluster
-backends") is a near-term follow-up, not dropped: the plan frames the warm worker *pool* as
-an optimization over that baseline, not a prerequisite, and this pass is about proving the
-execution/commit/cache-hit loop correct before adding process isolation on top of it.
+An [`ExecutionBackend`](@ref) that runs each [`StepInstance`](@ref) in-process,
+sequentially, with no process isolation between steps.
 """
 struct Local <: ExecutionBackend end
 
@@ -98,22 +100,19 @@ resolve(x, produced) = x
 """
     run(x; backend::ExecutionBackend=Local(), retention::Union{Nothing,RetentionPolicy}=nothing)
 
-Execute the graph `targets(x)` finds (push model, I7 — no backward target resolution, just
-the wired graph) and return the produced result in the *same shape* as `x` — a single
-node, a `Vector`, an arbitrary nested `(; qc, results)`, whatever `x` was. A `StepInstance`
-already recorded in the ledger with `status="done"` is a cache hit and is not re-run.
-`retention` is a `RetentionPolicy` (see `retention.jl`) consulted when recording each
-output's ledger row; omitted, every output records as `:cached`. `:fail` (abort on error,
-the default `Base` behaviour of letting the exception propagate) is the only implemented
-`on_upstream_failure` policy; `:skip`/`:placeholder` aren't wired up yet.
+Execute the graph reachable from `x` — a [`StepInstance`](@ref), or any nested
+`Tuple`/`NamedTuple`/`Vector` of them — and return the produced result in the same shape
+as `x` was given. A `StepInstance` already recorded as done is a cache hit and is not
+re-run. `retention` is a [`RetentionPolicy`](@ref) consulted when recording each output;
+if omitted, every output records as `:cached`. `:fail` (the default — let the exception
+propagate) is the only implemented `on_upstream_failure` policy today.
 
-Each step runs with the working directory `cd`'d into a fresh scratch dir — a step body
-writes outputs at plain, ordinary paths (`"trimmed.txt"`, `"logs/run.log"`, ...) with no
-Hapi call involved; `run` is what turns "wherever the body wrote, relative to where it
-ran" into "committed under the content-addressed store," not the body itself. This is
-also why the *identical* function is directly callable outside `run` (e.g. from a REPL or
-a unit test): called standalone, it just writes relative to the caller's own working
-directory, same as any ordinary function.
+Each step runs with the working directory `cd`'d into a fresh scratch directory, so a step
+body can write outputs at plain, ordinary relative paths (`"trimmed.txt"`,
+`"logs/run.log"`, ...) with no Hapi-specific call involved; `run` is what commits whatever
+the body wrote into the content-addressed store. Because of this, the identical function
+used inside `run` is also directly callable outside it (from a REPL, a unit test, ...) — it
+just writes relative to the caller's own working directory, like any ordinary function.
 """
 function Base.run(
         x; backend::ExecutionBackend = Local(),

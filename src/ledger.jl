@@ -56,7 +56,7 @@ end
     record!(db, step_hash, name::Symbol, state::Symbol; output_hash=nothing, relpath=nothing, retention=:cached)
 
 Upsert a ledger row: either a `StepInstance`'s own row, or one of its outputs' state
-(`:present` | `:intentionally_absent` | `:failed`, I11a) and retention class (I11b).
+(`:present`, `:intentionally_absent`, or `:failed`) and retention class.
 """
 function record!(
         db::SQLite.DB, hash::Digest, si::StepInstance;
@@ -115,8 +115,8 @@ end
 """
     row(db, hash) -> Union{Nothing,NamedTuple}
 
-The raw `step_instances` ledger row for `hash`, or `nothing` if no such StepInstance was
-recorded. The basis for the `hapi why` command once the CLI exists.
+The raw `step_instances` ledger row for `hash`, or `nothing` if no such `StepInstance` was
+recorded.
 """
 function row(db::SQLite.DB, hash::Digest)
     for r in DBInterface.execute(
@@ -139,7 +139,7 @@ end
     outputrows(db, hash) -> Vector{NamedTuple}
 
 Every `outputs` row recorded for the `StepInstance` at `hash` — the basis for cache-hit
-reconstruction (`reconstruct`, `backends.jl`) and for `hapi why` on a specific output.
+reconstruction in [`run`](@ref).
 """
 function outputrows(db::SQLite.DB, hash::Digest)
     rows = NamedTuple[]

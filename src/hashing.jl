@@ -1,5 +1,10 @@
-# A content hash. Wraps the raw SHA-256 digest so callers get hex `show`/`string` for
-# free instead of reading raw bytes everywhere (store paths, ledger rows, `hapi why`).
+"""
+    Digest
+
+A content hash — wraps a raw SHA-256 digest so callers get hex `show`/`string` for free
+instead of handling raw bytes directly (store paths, ledger rows, ...). Construct one with
+[`digest`](@ref), not the `Digest` constructor directly.
+"""
 struct Digest
     bytes::NTuple{32, UInt8}
 end
@@ -8,10 +13,10 @@ end
     digest(x) -> Digest
 
 The content digest of `x`. Dispatches over what `x` is: raw bytes or a string hash
-directly; a `Digest...` combination folds several digests into one (order-sensitive —
-used to fold a StepInstance's code hash, params, env identity, and each input's hash into
-a single instance hash); a `Step` hashes its source (`code_hash`, I9); an `AbstractArtifact`
-or `StepInstance` hashes its task identity (plan §4).
+directly; several `Digest`s combine (order-sensitively) into one, e.g. to fold a
+[`StepInstance`](@ref)'s code hash, params, environment identity, and each input's digest
+into a single task-identity hash; a [`Step`](@ref) hashes its source code; an
+`AbstractArtifact` or `StepInstance` hashes its task identity.
 """
 digest(data::AbstractVector{UInt8}) = Digest(NTuple{32, UInt8}(sha256(data)))
 digest(s::AbstractString) = digest(Vector{UInt8}(codeunits(s)))

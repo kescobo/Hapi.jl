@@ -1,22 +1,54 @@
-# The definition side (plan.md §3): a pure, testable callable plus its policies. Carries
-# NOTHING execution-related (I6) — env/resources are instance-level, attached below.
+"""
+    OutputDecl(name::Symbol, optional::Bool)
+
+Declares one of a [`Step`](@ref)'s named outputs. Build one with [`required`](@ref) or
+[`optional`](@ref) rather than calling `OutputDecl` directly.
+"""
 struct OutputDecl
     name::Symbol
     optional::Bool
 end
+
+"""
+    required(name::Symbol) -> OutputDecl
+
+An [`OutputDecl`](@ref) for an output that must be present.
+"""
 required(name::Symbol) = OutputDecl(name, false)
+
+"""
+    optional(name::Symbol) -> OutputDecl
+
+An [`OutputDecl`](@ref) for an output that may be legitimately absent.
+"""
 optional(name::Symbol) = OutputDecl(name, true)
 
+"""
+    Step(f::Function, name::Symbol; outputs=OutputDecl[], depends_on=Function[],
+         stale_policy=:hash, on_upstream_failure=:fail, collapse=false)
+
+A pipeline step definition: a pure, testable callable `f` plus its policies. A `Step`
+carries no execution state — no environment, no resources — those are bound per call, on
+the [`StepInstance`](@ref) it produces when applied to inputs.
+
+`depends_on` lists helper functions whose source should be folded into this step's code
+hash (`f`'s own body is hashed automatically; it does not transitively hash callees).
+`stale_policy` is `:hash` (content-hash based staleness, the default) or `:exists`.
+`on_upstream_failure` is `:fail` (the default; only value implemented today), `:skip`, or
+`:placeholder`. `collapse` is set by [`confluence`](@ref) and should not be passed
+directly — it changes the calling convention (the whole input collection passed as one
+argument, rather than splatted) without affecting code identity.
+
+Most steps are defined via [`@step`](@ref) rather than by calling `Step` directly.
+"""
 struct Step
     f::Function
     name::Symbol
     outputs::Vector{OutputDecl}
-    depends_on::Vector{Function}   # explicit code deps folded into digest(::Step) (I9)
+    depends_on::Vector{Function}
     stale_policy::Symbol           # :hash (default) | :exists
     on_upstream_failure::Symbol    # :fail (default) | :skip | :placeholder
-    collapse::Bool                 # true only for confluence(f, nodes) — see confluence.jl.
-    # Changes the calling convention, not code identity, so — like stale_policy/
-    # on_upstream_failure — it's un-hashed Step metadata (see digest(::Step)).
+    collapse::Bool                 # true only for confluence(f, nodes) — see confluence.jl
 end
 
 function Step(
@@ -33,9 +65,15 @@ function Step(
     )
 end
 
-# Calling a Step returns this — a lazy graph node, NOT a computed result (I3). `inputs`
-# holds concrete AbstractArtifacts and/or upstream StepInstances, which is what lets calls
-# nest and any composition syntax (`|>`, `@chain`, plain nesting) build the graph for free.
+"""
+    StepInstance <: AbstractArtifact
+
+A lazy graph node produced by calling a [`Step`](@ref) on its inputs — **not** a computed
+result. `inputs` holds concrete artifacts and/or upstream `StepInstance`s, which is what
+lets calls nest (and ordinary composition — `|>`, `@chain`, plain nesting) build the graph
+for free, with no separate composition syntax needed. Call [`run`](@ref) on a
+`StepInstance` (or a collection containing one) to actually execute it.
+"""
 struct StepInstance <: AbstractArtifact
     step::Step
     code_hash::Digest
@@ -60,8 +98,8 @@ function merge_params(inputs, kwparams::NamedTuple)
     return merge(merged, kwparams)
 end
 
-# Application builds the graph; it never runs `f` (I3). Env/resources default to native/
-# unset and are overridden later by env!/resources!, never at definition (I6).
+# Application builds the graph; it never runs `f`. Env/resources default to native/unset
+# and are overridden later by env!/resources!, never at definition.
 function (s::Step)(inputs::AbstractArtifact...; params...)
     return StepInstance(
         s, digest(s), collect(AbstractArtifact, inputs),
@@ -69,20 +107,33 @@ function (s::Step)(inputs::AbstractArtifact...; params...)
     )
 end
 
-# A node's payload is its eventual output's payload, available only once the graph has
-# actually been run and committed to the store — execution isn't implemented yet.
+# A node's payload is its eventual output's payload, available only once `run` has actually
+# executed and committed it — calling `payload` on a StepInstance before that is a mistake.
 payload(si::StepInstance) = error(
     "StepInstance for step :$(si.step.name) has not been produced yet — run the graph first."
 )
 
-# A reference to one specific named output of a multi-output StepInstance (I10 extension:
-# a step's return value determines its outputs — a NamedTuple return is N named outputs,
-# keyed by its field names; a single value is one, named after the step). `si[:profile]`
-# wires that one output into a downstream call exactly like any other artifact.
+"""
+    Output <: AbstractArtifact
+
+A reference to one specific named output of a multi-output [`StepInstance`](@ref) —
+returned by indexing the instance, `si[:profile]` or `si[(:profile, :bowtie2)]`
+(see [`StepInstance`](@ref)'s `getindex` methods) — and usable anywhere a downstream step
+expects an artifact input.
+"""
 struct Output <: AbstractArtifact
     si::StepInstance
     name::Symbol
 end
+
+"""
+    si[name::Symbol] -> Output
+    si[names::Tuple{Vararg{Symbol}}] -> Vector{Output}
+
+Reference one (or several) of a multi-output [`StepInstance`](@ref)'s named outputs, e.g.
+`metaphlan_result[:profile]` to pass just that output downstream. `si.step`'s output names
+come from the return value of the step's body at run time (see [`@step`](@ref)).
+"""
 Base.getindex(si::StepInstance, name::Symbol) = Output(si, name)
 Base.getindex(si::StepInstance, names::Tuple{Vararg{Symbol}}) = map(n -> Output(si, n), names)
 paramsof(o::Output) = o.si.params
@@ -114,10 +165,11 @@ mentions_abstractartifact(t) = false
 """
     digest(step::Step) -> Digest
 
-Shallow source-text hash (I9): the source of every *concrete-typed* method of `step.f`
-(`concretemethods` — excludes any `@step`-generated `AbstractArtifact`-dispatching
-sibling), plus every function in `step.depends_on`, concatenated in a deterministic order
-and hashed. No automatic transitive callee hashing — that's what `depends_on` is for.
+A shallow source-text hash of `step`'s code: the source of every *concrete-typed* method of
+`step.f` (excluding any `@step`-generated `AbstractArtifact`-dispatching sibling), plus
+every function in `step.depends_on`, concatenated in a deterministic order and hashed. This
+does not transitively hash callees — list any helper function whose changes should
+invalidate the cache in `depends_on`.
 """
 function digest(step::Step)
     ms = concretemethods(step.f)
@@ -138,27 +190,27 @@ sourcetext(m::Method) = string(CodeTracking.definition(String, m))
         ...
     end
 
-Lift a function authored against **plain values** into a graph citizen (I2, I9): the
-original method is left completely untouched (still directly callable/testable on real
-values — `foo(a_real_path; sample="x")` runs the body exactly as written, no Hapi types
-involved). `@step` adds ONE sibling method under the *same name* that accepts
-artifacts/`StepInstance`s and builds a lazy graph node via `Step`'s existing callable —
-ordinary multiple dispatch, not the macro, decides which method runs for a given call.
+Lift a function authored against **plain values** into a pipeline step. The original
+method is left completely untouched — it stays directly callable/testable on real values
+(`foo(a_real_path; sample="x")` runs the body exactly as written, no Hapi types involved).
+`@step` adds one sibling method under the *same name* that accepts artifacts/
+[`StepInstance`](@ref)s instead and builds a lazy graph node; ordinary multiple dispatch,
+not the macro, decides which method runs for a given call.
 
-The body stays "normal" on *both* ends: `run` unwraps each input via `payload` before
-calling it, and wraps whatever it returns via `artifact`. What a body returns determines
-its outputs — not a macro option, decided fresh from the return value each run: a single
-value (an `AbstractPath`, say) is one output, named after the step; a `NamedTuple` return
-is N named outputs, one per field, each independently committed/hashed/retained — see
-`si[:name]`/`Output` for wiring a specific one downstream. Returning an `AbstractArtifact`
-directly always passes through `artifact` unchanged (full control — a custom hash, etc.);
-that also means an explicitly-constructed `FileGroupArtifact` return is one grouped output,
-not several — only a *bare* `NamedTuple` of un-wrapped values means "N separate outputs."
+The body stays a plain function on both ends: [`run`](@ref) unwraps each input via
+[`payload`](@ref) before calling it, and wraps whatever it returns via [`artifact`](@ref).
+What the body returns determines its outputs, decided fresh from the return value each run:
+a single value (an `AbstractPath`, say) is one output, named after the step; a `NamedTuple`
+return is N named outputs, one per field, each independently committed/hashed/retained —
+see [`Output`](@ref) for wiring one of them downstream via `si[:name]`. Returning an
+`AbstractArtifact` directly always passes through [`artifact`](@ref) unchanged (full
+control over the result — a custom hash, etc.); this also means an explicitly-constructed
+[`FileGroupArtifact`](@ref) return is one grouped output, not several — only a *bare*
+`NamedTuple` of un-wrapped values means "N separate outputs."
 
-Limitation, disclosed rather than silently mishandled: decorating a *second* concrete-typed
-overload of the same name still works for hashing (both methods are concrete, so
-`concretemethods`/`digest` see both) but its output declaration/policies replace the
-first `@step`'s `Step` — full per-overload metadata merging isn't implemented yet.
+Current limitation: decorating a *second* concrete-typed overload of the same name still
+works for hashing (both methods are concrete, so both are included), but its output
+declaration/policies replace the first `@step`'s `Step` rather than merging with it.
 """
 macro step(expr)
     def = splitdef(expr)
@@ -185,9 +237,10 @@ envdigest(::Val{E}) where {E} = error("env resolution for :$E is not implemented
 """
     digest(si::StepInstance) -> Digest
 
-A StepInstance's task identity (plan §4): code hash + params + resolved env tool-identity
-+ each input's digest, recursing into upstream StepInstances. `resources` never enters
-this (I4).
+A `StepInstance`'s task identity: its step's code hash, its `params`, its resolved
+environment's tool identity, and each input's digest (recursing into upstream
+`StepInstance`s). `si.resources` never enters this — resource changes never invalidate the
+cache.
 """
 function digest(si::StepInstance)
     return digest(

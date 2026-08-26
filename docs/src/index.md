@@ -1,16 +1,82 @@
 ```@meta
 CurrentModule = Hapi
-DocTestSetup  = quote
-    using Hapi
-end
-```
 ```
 
 # Hapi
 
-```@index
+```@docs
+Hapi
 ```
 
+## Building pipelines
+
 ```@docs
-build_regex
+Step
+OutputDecl
+required
+optional
+@step
+StepInstance
+Output
+confluence
+source
+glob_table
+```
+
+## Artifacts
+
+```@docs
+AbstractArtifact
+payload
+artifact
+FileArtifact
+FileGroupArtifact
+```
+
+## Execution
+
+```@docs
+run
+ExecutionBackend
+Local
+plan
+targets
+PlanResult
+```
+
+## Retention & provenance
+
+```@docs
+RetentionPolicy
+retention
+retentionfor
+ledger
+record!
+row
+outputrows
+path
+scratchdir
+commit!
+```
+
+## Environments & resources
+
+```@docs
+EnvSpec
+Native
+JLLEnv
+EnvName
+Resources
+```
+
+## Hashing
+
+```@docs
+Digest
+digest
+```
+
+## Index
+
+```@index
 ```

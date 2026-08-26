@@ -1,8 +1,3 @@
-include("HapiTests.jl")
+using TestItemRunner
 
-using Hapi
-using .HapiTests
-
-Hapi.runtests()
-HapiTests.runtests()
-
+@run_package_tests()

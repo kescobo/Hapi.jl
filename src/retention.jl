@@ -2,10 +2,10 @@
     RetentionPolicy
 
 A pipeline-level overlay of retention classes, keyed by step name (applies to all of that
-step's outputs) or by step name + output name (applies to just that one). Retention is
-pipeline policy, not step definition (I6's env/resources layering applied to retention
-too) — `@step` never declares it; `retention(...)` builds this immutably and `run(...;
-retention=...)` is the only place it's consulted.
+step's outputs) or by step name + output name (applies to just that one). Built by
+[`retention`](@ref) and consulted by [`run`](@ref); a step never declares its own
+retention — it's a pipeline-level decision layered on afterward, not part of the step
+definition.
 """
 struct RetentionPolicy
     whole_step::Dict{Symbol, Symbol}
@@ -16,8 +16,9 @@ end
     retention(x, pairs::Pair...) -> RetentionPolicy
 
 Build a retention overlay for the graph reachable from `x` — the full transitive ancestry
-(`plan(x).order`), not just `x`'s own top-level shape, since a step like `:concatenate` is
-typically an upstream *ancestor* of whatever `x` holds directly, not something `x` names.
+([`plan`](@ref)`(x).order`), not just `x`'s own top-level shape, since a step like
+`:concatenate` is typically an upstream *ancestor* of whatever `x` holds directly, not
+something `x` names.
 Each pair is `step_name => retention` (applies to every output of that step) or
 `step_name => (output_name = retention, ...)` (applies to just those named outputs, e.g.
 `:metaphlan => (bowtie2 = :published,)`). Validated against the graph's actual step names —
