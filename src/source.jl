@@ -1,44 +1,46 @@
 """
-    source(f, tbl) -> Vector
+    source(f, table; params=row -> NamedTuple()) -> Vector{AbstractArtifact}
 
-The one real input boundary (plan §6.1). `tbl` is any Tables.jl row source (a `DataFrame`,
-`glob_table`'s output, a hand-built `Vector{NamedTuple}` — Hapi owns no sample-sheet type);
-`f(row)` lifts each row into a typed artifact. Reading, filtering, and joining tables is
-ordinary user code, not Hapi's. Meant to be used with `do`-block syntax:
-```julia
-reads = source(tbl) do row
-    FileArtifact(row.path; sample = row.sample)
+Apply ordinary Julia code to each row of any Tables.jl source, then lift the returned value
+into the workflow graph. A path becomes a file source and a `NamedTuple` becomes a structured
+source whose shape is preserved.
+"""
+function source(f, table; params = row -> NamedTuple())
+    artifacts = AbstractArtifact[]
+    for row in Tables.rows(table)
+        push!(artifacts, sourceartifact(f(row), params(row)))
+    end
+    return artifacts
 end
-```
-"""
-source(f, tbl) = [f(row) for row in Tables.rows(tbl)]
+
+sourceartifact(value, metadata::NamedTuple) = artifact(value, metadata)
+sourceartifact(value, metadata) = error("source params must return a NamedTuple")
 
 """
-    glob_table(pattern::AbstractString) -> Vector{NamedTuple}
+    glob_table(pattern) -> Vector{NamedTuple}
 
-Hapi's one tabular job: parse the `{wildcard}` convention out of filenames matching
-`pattern` (e.g. `"data/{sample}.fastq.gz"`) into a table — one row per matched file, one
-column per named wildcard, plus `path` holding the matched file. Anything fancier
-(grouping, joining, pivoting) is ordinary Tables.jl/DataFrames code, not Hapi's (§6.1) —
-bypass this entirely and use any other Tables.jl source when there's no glob to parse.
+Parse `{name}` wildcard fields from matching filenames into a plain Tables.jl-compatible
+row collection.
 """
 function glob_table(pattern::AbstractString)
-    dir, filepattern = splitdir(pattern)
-    isempty(dir) && (dir = ".")
+    directory, file_pattern = splitdir(pattern)
+    isempty(directory) && (directory = ".")
     names = Symbol[]
-    rxstr = replace(
-        filepattern, r"\{(\w+)\}" => function (m)
-            push!(names, Symbol(m[2:(end - 1)]))
-            return "(?<$(m[2:(end - 1)])>[^/]+)"
-        end
+    regex_pattern = replace(
+        file_pattern,
+        r"\{(\w+)\}" => function (match)
+            name = match[2:(end - 1)]
+            push!(names, Symbol(name))
+            return "(?<$name>[^/]+)"
+        end,
     )
-    rx = Regex("^" * rxstr * "\$")
+    regex = Regex("^" * regex_pattern * "\$")
     rows = NamedTuple[]
-    for fname in readdir(dir)
-        m = match(rx, fname)
-        isnothing(m) && continue
-        wildcards = NamedTuple(n => m[string(n)] for n in names)
-        push!(rows, merge(wildcards, (path = Path(joinpath(dir, fname)),)))
+    for filename in readdir(directory)
+        match_result = match(regex, filename)
+        isnothing(match_result) && continue
+        wildcards = NamedTuple(name => match_result[string(name)] for name in names)
+        push!(rows, merge(wildcards, (; path = Path(joinpath(directory, filename)))))
     end
     return rows
 end

@@ -1,39 +1,83 @@
 """
-    path(d::Digest; root=".hapi") -> String
+    path(digest; root=abspath(".hapi"))
 
-The content-addressed store path for `d`: `\$root/store/objects/<hash[0:2]>/<hash>`.
-`root` defaults to an absolute path (not the literal `".hapi"`) so it still resolves
-correctly from inside a step's scratch directory, which [`run`](@ref) `cd`s into while
-executing.
+Path of an immutable content object in the local store.
 """
-path(d::Digest; root::AbstractString = abspath(".hapi")) =
-    joinpath(root, "store", "objects", string(d)[1:2], string(d))
+path(hash::Digest; root::AbstractString = abspath(".hapi")) =
+    joinpath(root, "store", "objects", string(hash)[1:2], string(hash))
 
 """
-    scratchdir(; root=".hapi") -> String
+    scratchdir(; root=abspath(".hapi"))
 
-A fresh directory to compute a `StepInstance`'s outputs into, on the same filesystem as the
-store so [`commit!`](@ref) can move it in atomically — not `mktempdir()`, since that
-defaults to the system temp dir, which is often a different filesystem/mount than `root`
-(which would silently downgrade `commit!`'s move from an atomic rename to a copy+delete).
+Create an execution directory on the store filesystem so committing an output object uses
+an atomic rename.
 """
 function scratchdir(; root::AbstractString = abspath(".hapi"))
-    dir = joinpath(root, "tmp")
-    mkpath(dir)
-    return mktempdir(dir)
+    parent = joinpath(root, "tmp")
+    mkpath(parent)
+    return mktempdir(parent)
 end
 
 """
-    commit!(tmpdir, digest; root=".hapi") -> String
+    commit!(source, digest; root=abspath(".hapi"))
 
-Atomically move a completed temp dir into the content-addressed store under `digest`. Only
-called after a `StepInstance`'s outputs are fully written — a failed or interrupted run
-simply never calls this, so partial outputs never enter the store.
+Move a validated file into the immutable object store. An existing object with the same
+content hash is reused.
 """
-function commit!(tmpdir::AbstractString, d::Digest; root::AbstractString = abspath(".hapi"))
-    target = path(d; root)
-    isdir(target) && return target   # already committed under this content hash
+function commit!(source::AbstractString, hash::Digest; root::AbstractString = abspath(".hapi"))
+    target = path(hash; root)
     mkpath(dirname(target))
-    mv(tmpdir, target)
+    if isfile(target)
+        digest(Path(target)) == hash && return target
+        mv(source, target; force = true)
+        return target
+    end
+    mv(source, target)
     return target
+end
+
+"""
+    resultpath(task_hash, node_id, logical_name; root=abspath(".hapi"))
+
+Stable execution-visible path for a result-manifest file node. The file is a hard link to
+the byte-addressed object, keeping its logical basename without duplicating its contents.
+"""
+function resultpath(
+        task_hash::Digest,
+        node_id::Integer,
+        logical_name::AbstractString;
+        root::AbstractString = abspath(".hapi"),
+    )
+    validate_logical_name(logical_name)
+    return joinpath(root, "results", string(task_hash), string(node_id), logical_name)
+end
+
+function materializeresult!(
+        task_hash::Digest,
+        node_id::Integer,
+        logical_name::AbstractString,
+        object_hash::Digest;
+        root::AbstractString = abspath(".hapi"),
+    )
+    source = path(object_hash; root)
+    destination = resultpath(task_hash, node_id, logical_name; root)
+    mkpath(dirname(destination))
+    if isfile(destination)
+        digest(Path(destination)) == object_hash && return destination
+        rm(destination; force = true)
+    end
+    Base.Filesystem.hardlink(source, destination)
+    return destination
+end
+
+function outputpath(path::AbstractPath, scratch::AbstractString)
+    candidate = string(path)
+    absolute = isabspath(candidate) ? normpath(candidate) : normpath(joinpath(scratch, candidate))
+    isfile(absolute) || error("step returned an output that does not exist: $absolute")
+    islink(absolute) && error("symbolic-link outputs are not supported: $absolute")
+    canonical = realpath(absolute)
+    relative = relpath(canonical, realpath(scratch))
+    first(splitpath(relative)) == ".." &&
+        error("step output is outside its scratch directory: $canonical")
+    return canonical
 end

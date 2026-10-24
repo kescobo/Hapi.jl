@@ -1,34 +1,58 @@
-# Hapi
+# Hapi.jl
 
-[![Project Status: Concept](https://www.repostatus.org/badges/latest/concept.svg)](https://www.repostatus.org/#concept)
-[![Build Status](https://github.com/kescobo/Hapi.jl/workflows/CI/badge.svg)](https://github.com/kescobo/Hapi.jl/actions)
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://kescobo.github.io/Hapi.jl/stable)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://kescobo.github.io/Hapi.jl/dev)
+Hapi turns ordinary Julia functions into content-addressed workflows with minimal
+workflow-specific syntax.
 
->Hapi was the god of the annual flooding of the Nile
->in ancient Egyptian religion.
->The flood deposited rich silt (fertile soil) on the river's banks,
->allowing the Egyptians to grow crops.
->Hapi was greatly celebrated among the Egyptians.
->Some of the titles of Hapi were
->"Lord of the Fish and Birds of the Marshes"
->and "Lord of the River Bringing Vegetation".
->Hapi is typically depicted as an androgynous figure
->with a large belly and pendulous breasts,
->wearing a loincloth and ceremonial false beard.
+```julia
+using Hapi
 
-https://en.wikipedia.org/wiki/Hapi_(Nile_god)
+@step function wordcount(input::AbstractPath; sample)
+    output = Path("$(sample)_count.txt")
+    write(string(output), string(length(split(read(input, String)))))
+    return output
+end
 
-Some background: https://www.nature.com/articles/d41586-019-02619-z
+inputs = source([(sample="A", path="A.txt"), (sample="B", path="B.txt")];
+                params=row -> (; sample=row.sample)) do row
+    Path(row.path)
+end
 
-## Notes
+results = run(map(wordcount, inputs))
+```
 
-This is my workflow manager.
-[There](https://snakemake.readthedocs.io/en/stable/)
-[are](https://airflow.apache.org)
-[many](https://cromwell.readthedocs.io/en/stable/)
-[like](https://github.com/spotify/luigi)
-[it](https://www.commonwl.org/#Implementations),
-but this one is mine.
+`wordcount` remains an ordinary function when called with an ordinary path. When called on a
+value from `source` or another step, it builds a lazy graph node instead. `run` validates
+outputs, stores files by content hash, and reuses complete cached results.
 
-See [issue 1](https://github.com/kescobo/Hapi.jl/issues/1) for more details.
+Logical filenames survive storage and cache hits. Compound bioinformatics extensions are
+handled as a unit:
+
+```julia
+with_stem_suffix(p"sample_R1.fastq.gz", "_trimmed")
+# p"sample_R1_trimmed.fastq.gz"
+```
+
+The default immutable policy recognizes common FASTQ/FASTA, SAM/BAM/CRAM, VCF/BCF,
+BED/GFF/GTF, and compression suffixes. Derive a policy for another compound extension
+without changing global state:
+
+```julia
+policy = addsuffixes(DEFAULT_EXTENSION_POLICY, ".loom.gz")
+splitname(p"matrix.loom.gz", policy)  # ("matrix", ".loom.gz")
+```
+
+Structured ordinary values are preserved:
+
+```julia
+@step function trim(reads::NamedTuple; sample)
+    (; R1, R2) = reads
+    # write outputs...
+    return (; R1=trimmed_R1, R2=trimmed_R2)
+end
+```
+
+Passing the whole result downstream reconstructs the `NamedTuple`; indexing, such as
+`trimmed[:R1]`, selects one leaf.
+
+Hapi is under active development. The current design contract is documented in the outer
+development workspace's `hapi-plan.md`.

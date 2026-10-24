@@ -1,65 +1,68 @@
 """
     PlanResult
 
-`order` is the given target(s) and everything upstream of them, in dependency-first
-topological order. `frontier` is a forward-compat hook for dynamic (unknown-cardinality)
-outputs, a feature that doesn't exist yet — it is always `false` today.
+Dependency-first execution order for a concrete workflow graph.
 """
 struct PlanResult
     order::Vector{StepInstance}
-    frontier::Bool
 end
 
 """
-    targets(x) -> Vector{StepInstance}
+    targets(value) -> Vector{StepInstance}
 
-Every `StepInstance` reachable from `x` by walking `Tuple`/`NamedTuple`/`AbstractArray`
-nesting — a `StepInstance` (or `Output`, resolved to its parent) is a leaf; anything else
-is ignored. This is what lets `plan`/`run`/`retention` take whatever ordinary Julia value
-a pipeline function returns (a single node, a `Vector`, `(; qc, results)`, ...) instead of
-requiring it pre-flattened.
+Find lazy step nodes in nested tuples, named tuples, and arrays.
 """
-targets(x) = targets!(StepInstance[], x)
-targets!(acc::Vector{StepInstance}, si::StepInstance) = push!(acc, si)
-targets!(acc::Vector{StepInstance}, o::Output) = targets!(acc, o.si)
-function targets!(acc::Vector{StepInstance}, x::Union{Tuple, NamedTuple, AbstractArray})
-    for v in x
-        targets!(acc, v)
+targets(value) = targets!(StepInstance[], value)
+targets!(targets::Vector{StepInstance}, instance::StepInstance) = push!(targets, instance)
+targets!(targets::Vector{StepInstance}, output::Output) = targets!(targets, output.instance)
+
+function targets!(targets::Vector{StepInstance}, value::Union{Tuple, NamedTuple, AbstractArray})
+    for item in value
+        targets!(targets, item)
     end
-    return acc
+    return targets
 end
-targets!(acc::Vector{StepInstance}, x) = acc
+
+targets!(targets::Vector{StepInstance}, value) = targets
 
 """
-    plan(x) -> PlanResult
+    plan(value) -> PlanResult
 
-Build the execution order for every `StepInstance` [`targets`](@ref)`(x)` finds, and
-everything they (transitively) depend on. A pure graph walk over `.inputs` — no I/O, no
-backend knowledge; nothing about how the graph will eventually be executed is decided here.
+Build a dependency-first order without executing code or consulting a backend.
 """
-function plan(x)::PlanResult
+function plan(value)
     order = StepInstance[]
     visiting = Set{StepInstance}()
     visited = Set{StepInstance}()
-    for target in targets(x)
+    for target in targets(value)
         visit!(order, visiting, visited, target)
     end
-    return PlanResult(order, false)
+    return PlanResult(order)
 end
 
-function visit!(order, visiting, visited, node::StepInstance)
-    node in visited && return nothing
-    node in visiting && error("cycle detected in graph at step :$(node.step.name)")
-    push!(visiting, node)
-    for input in node.inputs
+function visit!(order, visiting, visited, instance::StepInstance)
+    instance in visited && return nothing
+    instance in visiting && error("cycle detected in graph at step :$(instance.step.name)")
+    push!(visiting, instance)
+    for input in instance.inputs
         visitinput!(order, visiting, visited, input)
     end
-    delete!(visiting, node)
-    push!(visited, node)
-    push!(order, node)
+    delete!(visiting, instance)
+    push!(visited, instance)
+    push!(order, instance)
     return nothing
 end
 
-visitinput!(order, visiting, visited, input::StepInstance) = visit!(order, visiting, visited, input)
-visitinput!(order, visiting, visited, input::Output) = visit!(order, visiting, visited, input.si)
+visitinput!(order, visiting, visited, instance::StepInstance) =
+    visit!(order, visiting, visited, instance)
+visitinput!(order, visiting, visited, output::Output) =
+    visit!(order, visiting, visited, output.instance)
+
+function visitinput!(order, visiting, visited, gathered::Gathered)
+    for item in gathered.items
+        visitinput!(order, visiting, visited, item)
+    end
+    return nothing
+end
+
 visitinput!(order, visiting, visited, input) = nothing

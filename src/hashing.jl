@@ -21,6 +21,44 @@ into a single task-identity hash; a [`Step`](@ref) hashes its source code; an
 digest(data::AbstractVector{UInt8}) = Digest(NTuple{32, UInt8}(sha256(data)))
 digest(s::AbstractString) = digest(Vector{UInt8}(codeunits(s)))
 digest(parts::Digest...) = digest(reduce(vcat, (collect(p.bytes) for p in parts); init = UInt8[]))
+digest(parts::AbstractString...) = digest((digest(part) for part in parts)...)
+
+# Parameters are part of task identity, so encode their structure and concrete scalar
+# representation rather than relying on display-oriented `repr` output.
+paramdigest(::Nothing) = digest("param:nothing")
+paramdigest(::Missing) = digest("param:missing")
+paramdigest(value::Bool) = digest("param:bool", string(value))
+paramdigest(value::Integer) = digest("param:integer", string(typeof(value)), string(value))
+paramdigest(value::Union{Float16, Float32, Float64}) =
+    digest("param:float", string(typeof(value)), bitstring(value))
+paramdigest(value::AbstractString) = digest("param:string", String(value))
+paramdigest(value::Symbol) = digest("param:symbol", string(value))
+paramdigest(value::Char) = digest("param:char", string(UInt32(value)))
+paramdigest(value::AbstractPath) = digest("param:path", string(value))
+
+function paramdigest(values::Tuple)
+    parts = Digest[digest("param:tuple")]
+    append!(parts, paramdigest(value) for value in values)
+    return digest(parts...)
+end
+
+function paramdigest(values::NamedTuple)
+    parts = Digest[digest("param:namedtuple")]
+    for (name, value) in pairs(values)
+        push!(parts, digest("param:key", string(name)))
+        push!(parts, paramdigest(value))
+    end
+    return digest(parts...)
+end
+
+function parsedigest(hex::AbstractString)
+    ncodeunits(hex) == 64 || error("a SHA-256 digest must contain 64 hexadecimal characters")
+    bytes = ntuple(32) do index
+        first = 2 * index - 1
+        parse(UInt8, hex[first:(first + 1)]; base = 16)
+    end
+    return Digest(bytes)
+end
 
 Base.string(d::Digest) = bytes2hex(collect(d.bytes))
 Base.show(io::IO, d::Digest) = print(io, "Digest(", string(d)[1:12], "…)")

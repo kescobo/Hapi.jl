@@ -3,48 +3,46 @@
 
 A workflow engine for content-addressed, cacheable data-processing pipelines.
 
-Pipelines are built by applying [`Step`](@ref)s (wrapped with [`@step`](@ref)) to
-[`AbstractArtifact`](@ref)s — typically [`FileArtifact`](@ref)/[`FileGroupArtifact`](@ref)
-produced by [`source`](@ref) — which lazily builds a graph of [`StepInstance`](@ref)s.
-Call [`run`](@ref) on the result (or any nested collection of results) to execute the
-graph: each step's inputs and code are content-hashed, outputs are committed to a
-content-addressed store, and a step whose hash is already recorded is skipped rather than
-re-run. [`retention`](@ref) attaches a publish/cache/temp policy to specific outputs.
+Ordinary Julia functions become lazy workflow steps by adding [`@step`](@ref). Direct calls
+on ordinary values still execute the original body; calls on values produced by [`source`](@ref)
+or another step build a graph of [`StepInstance`](@ref)s. [`run`](@ref) executes that graph,
+validates returned paths, stores files by content hash, and records a transactional result
+manifest for reproducible cache hits.
 """
 module Hapi
 
-export AbstractArtifact, payload, artifact, FileArtifact, FileGroupArtifact,
-    EnvSpec, Native, JLLEnv, CondaEnv, Container, EnvName, Resources,
+export AbstractArtifact, payload, FileArtifact, logicalname,
+    ExtensionPolicy, DEFAULT_EXTENSION_POLICY, addsuffixes, splitname, with_stem_suffix,
+    EnvName, Resources,
     Digest, digest,
-    OutputDecl, required, optional, Step, StepInstance, Output, @step,
+    Step, StepInstance, Output, @step,
     path, scratchdir, commit!,
-    ledger, record!, row, outputrows,
+    ledger, record!, row, resultrows,
     PlanResult, plan, targets,
     ExecutionBackend, Local,
     source, glob_table,
-    confluence,
-    RetentionPolicy, retention, retentionfor,
-    AbstractPath, Path
+    gather, confluence,
+    AbstractPath, Path, @p_str
 
-using Dates: Period
+using Dates: Period, now
 using SHA: sha256
 using CodeTracking
 using SQLite
 using DBInterface
-using FilePathsBase: AbstractPath, Path
-using MacroTools: splitdef, combinedef
+using FilePathsBase: AbstractPath, Path, @p_str, hasparent
+using MacroTools: splitdef, combinedef, prewalk
 using Tables
 
 include("hashing.jl")
+include("names.jl")
 include("artifacts.jl")
 include("env.jl")
 include("steps.jl")
 include("store.jl")
 include("ledger.jl")
+include("confluence.jl")
 include("plan.jl")
 include("source.jl")
-include("retention.jl")
-include("confluence.jl")
 include("backends.jl")
 
 end # module
